@@ -1,0 +1,41 @@
+{
+  "name": "drogueria-virtual-backend",
+  "version": "1.0.0",
+  "description": "Backend para Droguería Virtual - WhatsApp Bot + API REST",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "bot": "node server/bot.js",
+    "dev": "nodemon server/index.js",
+    "test": "jest --coverage"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.4",
+    "axios": "^1.13.5",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "fuse.js": "^7.0.0",
+    "helmet": "^7.1.0",
+    "node-cron": "^3.0.3",
+    "pdfkit": "^0.17.2",
+    "qrcode": "^1.5.3",
+    "resend": "^6.9.1",
+    "twilio": "^4.19.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.js"]
+  }
+}

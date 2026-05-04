@@ -1,0 +1,105 @@
+## render.yaml — Droguería Virtual
+## Documentación: https://render.com/docs/blueprint-spec
+##
+## Dos servicios:
+##   1. drogueria-api     → Backend Node.js (Web Service, always-on)
+##   2. drogueria-panel   → Frontend React (Static Site)
+
+services:
+
+  # ── BACKEND: Bot WhatsApp + API REST ──────────────────────────────────────
+  - type: web
+    name: drogueria-api
+    runtime: node
+    region: oregon          # La más cercana a Colombia disponible en Render
+    plan: starter           # $7/mes — OBLIGATORIO para bot WhatsApp (no duerme)
+                            # El plan free duerme tras 15 min → Twilio falla
+    buildCommand: cd backend && npm install --production
+    startCommand: cd backend && node server/index.js
+    healthCheckPath: /health  # Render verifica este endpoint cada 30s
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Puerto (Render lo asigna automáticamente — NO cambiar)
+      - key: PORT
+        value: 10000
+
+      # ── Supabase ────────────────────────────────────────────────────────
+      - key: SUPABASE_URL
+        sync: false           # Se configura manualmente en el dashboard de Render
+
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      # ── Twilio WhatsApp ─────────────────────────────────────────────────
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+
+      - key: TWILIO_WHATSAPP_NUMBER
+        sync: false           # formato: whatsapp:+57XXXXXXXXXX
+
+      - key: META_PHONE_NUMBER
+        sync: false           # solo dígitos: 57XXXXXXXXXX
+
+      # ── URL pública del backend (la genera Render al crear el servicio) ─
+      - key: API_URL
+        sync: false           # ej: https://drogueria-api.onrender.com
+
+      # ── Pagos ───────────────────────────────────────────────────────────
+      - key: NEQUI_NUMERO
+        sync: false
+
+      - key: DAVIPLATA_NUMERO
+        sync: false
+
+      - key: NOMBRE_CUENTA
+        sync: false
+
+      - key: COSTO_DOMICILIO
+        value: "4000"
+
+      # ── Email (Resend) ───────────────────────────────────────────────────
+      - key: RESEND_API_KEY
+        sync: false
+
+      - key: FROM_EMAIL
+        sync: false
+
+      # ── Seguridad ────────────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true   # Render genera un valor seguro automáticamente
+
+      - key: TC_SECRET
+        generateValue: true
+
+  # ── FRONTEND: Panel Admin React ───────────────────────────────────────────
+  - type: static
+    name: drogueria-panel
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: false
+
+    envVars:
+      # URL del backend (copiar la URL que asignó Render al servicio drogueria-api)
+      - key: VITE_API_URL
+        sync: false           # ej: https://drogueria-api.onrender.com
+
+      - key: VITE_SUPABASE_URL
+        sync: false
+
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+
+    routes:
+      # React Router — redirigir todo al index.html (SPA)
+      - type: rewrite
+        source: /*
+        destination: /index.html

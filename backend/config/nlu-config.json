@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "description": "NLU Config para Droguería Virtual",
+  "intents": {
+    "buscar_medicamento": {
+      "ejemplos": [
+        "acetaminofen",
+        "ibuprofeno",
+        "necesito pastillas para el dolor",
+        "busco algo para la gripa",
+        "tiene antibiótico",
+        "quiero un jarabe para la tos",
+        "dolex",
+        "advil",
+        "amoxicilina",
+        "necesito medicamento",
+        "buscar medicamento",
+        "1"
+      ]
+    },
+    "ver_pedidos": {
+      "ejemplos": [
+        "mis pedidos",
+        "ver pedidos",
+        "estado de mi pedido",
+        "donde esta mi pedido",
+        "2"
+      ]
+    },
+    "menu_principal": {
+      "ejemplos": [
+        "hola",
+        "menu",
+        "inicio",
+        "ayuda",
+        "buenas",
+        "buenos dias",
+        "buenas tardes",
+        "que puedes hacer"
+      ]
+    },
+    "confirmar": {
+      "ejemplos": ["si", "sí", "si quiero", "confirmar", "ok", "dale", "listo", "de acuerdo", "correcto"]
+    },
+    "cancelar": {
+      "ejemplos": ["no", "cancelar", "no quiero", "salir", "volver", "atras", "menu", "inicio"]
+    },
+    "agregar_carrito": {
+      "ejemplos": ["agregar", "quiero ese", "lo quiero", "pedir", "añadir", "me lo llevo"]
+    },
+    "ver_carrito": {
+      "ejemplos": ["ver carrito", "que tengo", "mi carrito", "cuanto va"]
+    },
+    "domicilio": {
+      "ejemplos": ["domicilio", "a mi casa", "que me lo traigan", "envio", "delivery", "llevar"]
+    },
+    "recoger_en_tienda": {
+      "ejemplos": ["recoger", "lo recojo", "voy a buscar", "paso a recoger", "retirar"]
+    },
+    "registro_drogueria": {
+      "ejemplos": [
+        "REGISTRO DROGUERIA",
+        "quiero registrar mi drogueria",
+        "registrar farmacia",
+        "unirme como drogueria",
+        "soy drogueria",
+        "tengo farmacia"
+      ]
+    }
+  },
+  "categorias_medicamentos": [
+    "analgésicos", "antibióticos", "antiinflamatorios", "vitaminas",
+    "antigripales", "dermatológicos", "cardiovasculares", "digestivos",
+    "respiratorios", "antihistamínicos"
+  ],
+  "respuestas_error": {
+    "no_encontrado": "Lo siento, no encontré resultados para tu búsqueda. ¿Puedes intentar con otro nombre?",
+    "error_general": "Hubo un problema. Por favor intenta de nuevo o escribe 'menu' para volver al inicio.",
+    "sin_stock": "En este momento ese medicamento no está disponible. ¿Te gustaría buscar otra opción?"
+  }
+}
