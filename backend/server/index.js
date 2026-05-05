@@ -394,7 +394,7 @@ app.patch('/api/admin/pedidos/:id/mensajero', async (req, res) => {
 
     // Notificar al mensajero por WhatsApp
     try {
-      await mensajeroService.notificarAsignacion(mens, data);
+      await mensajeroService.notificarMensajero(mensajeroId, data.id);
     } catch (e) { console.warn('[Admin] No se pudo notificar al mensajero:', e.message); }
 
     res.json({ success: true, pedido: data, mensajero: mens });
