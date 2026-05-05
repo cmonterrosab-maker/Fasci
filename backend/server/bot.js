@@ -683,7 +683,7 @@ async function mostrarInstruccionesPago(telefono, sesion) {
   // ── MODO WOMPI (recomendado): pago automatizado ──────────────────────────
   if (WOMPI_HABILITADO) {
     try {
-      const numeroPedido = `DV-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+      const numeroPedido = `DV-${new Date().getFullYear()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
       // Crear el pedido con status 'pendiente_pago'
       const { data: pedido, error } = await supabase
@@ -721,6 +721,7 @@ async function mostrarInstruccionesPago(telefono, sesion) {
         cantidad:           item.cantidad,
         precio_unitario:    item.precio_unitario,
         subtotal:           item.subtotal,
+        requiere_formula:   false,
       }));
       await supabase.from('detalle_pedidos').insert(detalles);
 
@@ -864,15 +865,21 @@ async function procesarPedidoFinal(telefono, sesion) {
       .insert({
         drogueria_id:      null,
         cliente_telefono:  telefono,
-        cliente_nombre:    datos.nombre || null,
+        cliente_nombre:    datos.nombre    || null,
+        cliente_cedula:    datos.cedula    || null,
         cliente_direccion: datos.ubicacion?.label || 'Ubicación GPS compartida',
+        cliente_lat:       datos.ubicacion?.lat   || null,
+        cliente_lng:       datos.ubicacion?.lng   || null,
         modalidad:         'domicilio',
         total:             total,
+        costo_domicilio:   COSTO_DOMICILIO,
         metodo_pago:       'nequi_daviplata',
-        notas:             `Cédula: ${datos.cedula || 'N/A'} | Comprobante: ${datos.comprobante} | Lat: ${datos.ubicacion?.lat} | Lng: ${datos.ubicacion?.lng}`,
-        formula_medica_url: datos.comprobante || null,
+        notas:             `Cédula: ${datos.cedula || 'N/A'} | Lat: ${datos.ubicacion?.lat || 'N/A'} | Lng: ${datos.ubicacion?.lng || 'N/A'}`,
+        comprobante_url:   datos.comprobante || null,
         tiene_formula:     false,
+        tc_aceptado:       true,
         canal:             'whatsapp',
+        es_b2c:            true,
         status:            'pendiente',
       })
       .select()
