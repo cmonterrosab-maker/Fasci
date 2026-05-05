@@ -153,6 +153,7 @@ export default function MensajerosLive() {
             Actualizar
           </button>
           </div>
+        </div>{/* /Header */}
 
         {/* Modal Registrar Mensajero */}
         {showModal && (
