@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
   MapPin, Phone, Bike, Star, Activity, RefreshCw, Circle,
-  AlertCircle, Package, Clock, User
+  AlertCircle, Package, Clock, User, UserPlus, X
 } from 'lucide-react';
 import MapaMensajeros from '../../components/MapaMensajeros';
 import { API_BASE_URL } from '../../lib/api';
@@ -47,11 +47,17 @@ type Resumen = {
   con_gps_vivo: number;
 };
 
+const FORM_VACIO = { nombre: '', telefono: '', vehiculo: 'moto', ciudad: 'Cartagena', zona: '', placa: '' };
+
 export default function MensajerosLive() {
   const [mensajeros, setMensajeros] = useState<Mensajero[]>([]);
   const [resumen, setResumen]       = useState<Resumen | null>(null);
   const [loading, setLoading]       = useState(true);
   const [seleccionado, setSeleccionado] = useState<Mensajero | null>(null);
+  const [showModal, setShowModal]   = useState(false);
+  const [form, setForm]             = useState(FORM_VACIO);
+  const [saving, setSaving]         = useState(false);
+  const [saveError, setSaveError]   = useState('');
 
   const cargar = async () => {
     try {
@@ -70,6 +76,28 @@ export default function MensajerosLive() {
     const id = setInterval(cargar, 15000); // refresh cada 15s
     return () => clearInterval(id);
   }, []);
+
+  const registrar = async () => {
+    if (!form.nombre.trim() || !form.telefono.trim()) return;
+    setSaving(true); setSaveError('');
+    try {
+      await axios.post(`${API}/api/admin/mensajeros`, {
+        nombre:   form.nombre.trim(),
+        telefono: form.telefono.trim().replace(/\D/g, '').slice(-10),
+        vehiculo: form.vehiculo,
+        ciudad:   form.ciudad.trim(),
+        zona:     form.zona.trim() || null,
+        placa:    form.placa.trim() || null,
+      });
+      setShowModal(false);
+      setForm(FORM_VACIO);
+      cargar();
+    } catch (err: any) {
+      setSaveError(err?.response?.data?.error || 'Error al registrar');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleDisponible = async (id: string, disponible: boolean) => {
     try {
@@ -110,6 +138,13 @@ export default function MensajerosLive() {
               Actualización automática cada 15 segundos
             </p>
           </div>
+          <div className="flex gap-3">
+          <button
+            onClick={() => { setShowModal(true); setSaveError(''); }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <UserPlus className="w-4 h-4" /> Registrar mensajero
+          </button>
           <button
             onClick={cargar}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
@@ -117,7 +152,70 @@ export default function MensajerosLive() {
             <RefreshCw className="w-4 h-4" />
             Actualizar
           </button>
-        </div>
+          </div>
+
+        {/* Modal Registrar Mensajero */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-gray-900">Registrar mensajero</h2>
+                <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Nombre completo *</label>
+                  <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.nombre}
+                    onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Juan García" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Teléfono WhatsApp * (10 dígitos)</label>
+                  <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.telefono}
+                    onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="3005292953" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Vehículo</label>
+                    <select className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.vehiculo}
+                      onChange={e => setForm(f => ({ ...f, vehiculo: e.target.value }))}>
+                      <option value="moto">Moto</option>
+                      <option value="bicicleta">Bicicleta</option>
+                      <option value="carro">Carro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Ciudad</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.ciudad}
+                      onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Zona (opcional)</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.zona}
+                      onChange={e => setForm(f => ({ ...f, zona: e.target.value }))} placeholder="Norte, Sur..." />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Placa (opcional)</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.placa}
+                      onChange={e => setForm(f => ({ ...f, placa: e.target.value }))} placeholder="ABC123" />
+                  </div>
+                </div>
+                {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-50">
+                  Cancelar
+                </button>
+                <button onClick={registrar} disabled={saving || !form.nombre || !form.telefono}
+                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                  {saving ? 'Guardando...' : 'Registrar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Resumen cards */}
         {resumen && (
