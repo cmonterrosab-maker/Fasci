@@ -387,7 +387,7 @@ async function manejarBusqueda(telefono, mensaje, sesion) {
     if (cached) {
       resultados = cached;
     } else {
-      const { data } = await medicamentoService.buscarMedicamentos(termino, { limit: 5 });
+      const { data } = await medicamentoService.buscarMedicamentosConPrecio(termino, { limit: 5 });
       resultados = data || [];
       if (resultados.length > 0) cache.set(cacheKey, resultados, 120);
     }
@@ -416,7 +416,7 @@ async function manejarBusqueda(telefono, mensaje, sesion) {
     const conc   = med.concentracion ? ` ${med.concentracion}` : '';
     const pres   = med.presentacion  ? ` - ${med.presentacion}` : '';
     const precio = med.precio ? `\n   💰 ${formatearPrecio(med.precio)}` : '';
-    const stock  = '   ✅ Disponible';
+    const stock  = med.stock > 0 ? `   ✅ Disponible (${med.stock} uds)` : '   ✅ Disponible';
 
     respuesta += `${emojis[i]} *${nombre}${conc}${pres}*${precio}\n${stock}\n\n`;
   });

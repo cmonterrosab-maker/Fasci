@@ -222,6 +222,74 @@ class MedicamentoService {
   }
 
   // ------------------------------------------------------------------
+  // buscarMedicamentosConPrecio
+  // Busca medicamentos disponibles en inventario (tabla catalogos) con precio.
+  // Devuelve el precio mínimo disponible entre todas las droguerías.
+  // ------------------------------------------------------------------
+  async buscarMedicamentosConPrecio(query = '', filtros = {}) {
+    try {
+      const { limit = 50 } = filtros;
+
+      const { data, error } = await this.supabase
+        .from('catalogos')
+        .select(`
+          id, precio, precio_sin_formula, stock, disponible,
+          drogueria_id,
+          medicamento_id,
+          medicamentos (
+            id, nombre, nombre_generico, laboratorio, presentacion,
+            concentracion, requiere_formula_medica, imagen_url,
+            categorias_medicamentos (id, nombre, icono)
+          )
+        `)
+        .eq('disponible', true)
+        .gt('stock', 0)
+        .limit(500);
+
+      if (error) throw error;
+
+      // Aplicar fuzzy search sobre el nombre del medicamento
+      let entradas = data.filter(e => e.medicamentos);
+      if (query && query.trim().length > 0) {
+        const fuse = new Fuse(entradas, {
+          keys: [
+            { name: 'medicamentos.nombre',          weight: 0.6 },
+            { name: 'medicamentos.nombre_generico', weight: 0.3 },
+            { name: 'medicamentos.laboratorio',     weight: 0.1 },
+          ],
+          threshold: 0.45,
+          includeScore: true,
+        });
+        entradas = fuse.search(query.trim()).map(r => r.item);
+      }
+
+      // Agrupar por medicamento_id y quedarse con el de precio mínimo
+      const porMedicamento = new Map();
+      for (const e of entradas) {
+        const mid = e.medicamento_id;
+        if (!porMedicamento.has(mid) || e.precio < porMedicamento.get(mid).precio) {
+          porMedicamento.set(mid, e);
+        }
+      }
+
+      const resultados = Array.from(porMedicamento.values())
+        .slice(0, limit)
+        .map(e => ({
+          ...e.medicamentos,
+          precio:          e.precio,
+          precio_sin_formula: e.precio_sin_formula,
+          stock:           e.stock,
+          catalogo_id:     e.id,
+          drogueria_id:    e.drogueria_id,
+        }));
+
+      return { data: resultados, total: resultados.length, query };
+    } catch (err) {
+      throw new Error(`MedicamentoService.buscarMedicamentosConPrecio: ${err.message}`);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // buscarDisponibleEnDroguerias
   // Devuelve las droguerías activas que tienen en stock un medicamento.
   // Filtra opcionalmente por ciudad.
