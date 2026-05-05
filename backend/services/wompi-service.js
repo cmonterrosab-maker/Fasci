@@ -21,6 +21,7 @@
 
 const crypto = require('crypto');
 const axios  = require('axios');
+const monitor = require('./monitor-service');
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -256,6 +257,9 @@ class WompiService {
     } else if (status === 'DECLINED' || status === 'VOIDED' || status === 'ERROR') {
       updates.status = 'cancelado';
       await this.supabase.from('pedidos').update(updates).eq('id', pedido.id);
+
+      // Alerta al admin
+      await monitor.alertarPagoFallido(pedido.numero_pedido, status);
 
       console.log(`[Wompi] ❌ Pago RECHAZADO/CANCELADO — pedido ${pedido.numero_pedido}: ${status}`);
       return { procesado: true, pedidoId: pedido.id, numeroPedido: pedido.numero_pedido, status };

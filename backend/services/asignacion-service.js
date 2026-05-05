@@ -21,6 +21,7 @@
  */
 
 const { sendWhatsAppMessage } = require('./whatsapp-service');
+const monitor = require('./monitor-service');
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -141,6 +142,8 @@ class AsignacionService {
 
       if (error) throw error;
       if (!mensajeros || mensajeros.length === 0) {
+        // Alerta al admin
+        await monitor.alertarSinMensajeros(pedidoId, 'Cartagena');
         return { success: false, error: 'Sin mensajeros disponibles', alerta_admin: 'No hay mensajeros disponibles para asignar.' };
       }
 

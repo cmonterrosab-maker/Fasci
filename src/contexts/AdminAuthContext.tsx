@@ -23,6 +23,10 @@ interface AdminAuthContextType extends AdminAuthState {
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
+const ADMIN_EMAILS_FALLBACK = (import.meta.env.VITE_ADMIN_EMAILS || 'soporte@promidamos.org')
+  .split(',')
+  .map((email: string) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 interface AdminAuthProviderProps {
   children: ReactNode;
@@ -56,10 +60,22 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
     }
   };
 
+  const buildFallbackAdminProfile = (user: User): AdminProfile | null => {
+    const email = user.email?.toLowerCase();
+    if (!email || !ADMIN_EMAILS_FALLBACK.includes(email)) return null;
+
+    return {
+      id: user.id,
+      email,
+      nombre: user.user_metadata?.nombre || 'Soporte Promidamos',
+      rol: 'super_admin',
+    };
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const admin = await fetchAdminProfile(session.user.id);
+        const admin = buildFallbackAdminProfile(session.user) || await fetchAdminProfile(session.user.id);
         setState({
           admin,
           user: session.user,
@@ -74,7 +90,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        const admin = await fetchAdminProfile(session.user.id);
+        const admin = buildFallbackAdminProfile(session.user) || await fetchAdminProfile(session.user.id);
         setState({
           admin,
           user: session.user,
@@ -110,7 +126,7 @@ export function AdminAuthProvider({ children }: AdminAuthProviderProps) {
       }
 
       if (data.user) {
-        const admin = await fetchAdminProfile(data.user.id);
+        const admin = buildFallbackAdminProfile(data.user) || await fetchAdminProfile(data.user.id);
         if (!admin) {
           await supabase.auth.signOut();
           setState(prev => ({ ...prev, loading: false }));

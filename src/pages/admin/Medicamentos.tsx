@@ -64,7 +64,8 @@ export default function AdminMedicamentos() {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/medicamentos');
-        setMedicamentos(res.data);
+        const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.medicamentos ?? []);
+        setMedicamentos(data);
       } catch {}
       finally { setLoading(false); }
     };

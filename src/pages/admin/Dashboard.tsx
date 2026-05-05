@@ -80,6 +80,12 @@ const ESTADO_CONFIG = {
   suspendida: { label: 'Suspendida', color: 'bg-red-100 text-red-800' },
 };
 
+function mapStatus(status?: string): Drogueria['estado'] {
+  if (status === 'active' || status === 'approved' || status === 'activo') return 'activa';
+  if (status === 'suspended' || status === 'inactive' || status === 'suspendido') return 'suspendida';
+  return 'pendiente';
+}
+
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState<GlobalMetrics>(MOCK_METRICS);
   const [droguerias, setDroguerias] = useState<Drogueria[]>(MOCK_DROGUERIAS);
@@ -90,14 +96,25 @@ export default function AdminDashboard() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [metricsRes, drogueriasRes, ciudadRes] = await Promise.all([
-          axios.get('/api/admin/metrics'),
+        const [metricsRes, drogueriasRes] = await Promise.all([
+          axios.get('/api/admin/stats'),
           axios.get('/api/admin/droguerias?limit=5&sort=recientes'),
-          axios.get('/api/admin/pedidos-por-ciudad'),
         ]);
-        setMetrics(metricsRes.data);
-        setDroguerias(drogueriasRes.data);
-        setCiudadData(ciudadRes.data);
+        setMetrics({
+          drogueriaActivas: metricsRes.data.total_droguerias || 0,
+          pedidosHoy: metricsRes.data.total_pedidos_hoy || 0,
+          medicamentosEnCatalogo: metricsRes.data.total_medicamentos || 0,
+          totalPedidosMes: MOCK_METRICS.totalPedidosMes,
+        });
+        setDroguerias((drogueriasRes.data.droguerias || []).map((d: any) => ({
+          id: d.id,
+          nombre: d.nombre,
+          ciudad: d.ciudad || 'Sin ciudad',
+          estado: mapStatus(d.status),
+          pedidosHoy: d.total_pedidos || 0,
+          fechaRegistro: d.created_at,
+        })));
+        setCiudadData(MOCK_CIUDAD_DATA);
       } catch {
         // usar mock
       } finally {

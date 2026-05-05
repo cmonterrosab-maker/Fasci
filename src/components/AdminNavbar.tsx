@@ -6,6 +6,10 @@ import {
   Store,
   Pill,
   ShoppingBag,
+  Activity,
+  Bike,
+  MessageCircle,
+  Gift,
   LogOut,
   Menu,
   X,
@@ -13,10 +17,14 @@ import {
 import { useAdminAuth } from '../contexts/AdminAuthContext';
 
 const navLinks = [
-  { to: '/admin/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
-  { to: '/admin/droguerias', label: 'Droguerias', icon: <Store className="h-4 w-4" /> },
-  { to: '/admin/medicamentos', label: 'Medicamentos', icon: <Pill className="h-4 w-4" /> },
-  { to: '/admin/pedidos', label: 'Pedidos', icon: <ShoppingBag className="h-4 w-4" /> },
+  { to: '/admin/dashboard',     label: 'Dashboard',     icon: <LayoutDashboard className="h-4 w-4" /> },
+  { to: '/admin/metricas',      label: 'Metricas',      icon: <Activity className="h-4 w-4" /> },
+  { to: '/admin/mensajeros',    label: 'Mensajeros',    icon: <Bike className="h-4 w-4" /> },
+  { to: '/admin/conversaciones', label: 'Chats',        icon: <MessageCircle className="h-4 w-4" /> },
+  { to: '/admin/pedidos',       label: 'Pedidos',       icon: <ShoppingBag className="h-4 w-4" /> },
+  { to: '/admin/droguerias',    label: 'Droguerias',    icon: <Store className="h-4 w-4" /> },
+  { to: '/admin/medicamentos',  label: 'Medicamentos',  icon: <Pill className="h-4 w-4" /> },
+  { to: '/admin/lealtad',       label: 'Lealtad',       icon: <Gift className="h-4 w-4" /> },
 ];
 
 export default function AdminNavbar() {

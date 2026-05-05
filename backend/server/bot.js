@@ -18,7 +18,8 @@
  *   PASO 11 → Confirmación final con número de pedido
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 const MedicamentoService = require('../services/medicamento-service');
@@ -29,6 +30,8 @@ const MensajeroService   = require('../services/mensajero-service');
 const AsignacionService  = require('../services/asignacion-service');
 const FeeService         = require('../services/fee-service');
 const WompiService       = require('../services/wompi-service');
+const CalificacionService = require('../services/calificacion-service');
+const LealtadService      = require('../services/lealtad-service');
 const B2BService         = require('../services/b2b-service');
 const securityService    = require('../services/security-service');
 const CacheService       = require('../services/cache-service');
@@ -38,7 +41,7 @@ const { sendWhatsAppMessage } = require('../services/whatsapp-service');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 );
 
 const medicamentoService = new MedicamentoService(supabase);
@@ -49,6 +52,8 @@ const mensajeroService   = new MensajeroService(supabase);
 const asignacionService  = new AsignacionService(supabase);
 const feeService         = new FeeService(supabase);
 const wompiService       = new WompiService(supabase);
+const calificacionService = new CalificacionService(supabase);
+const lealtadService      = new LealtadService(supabase);
 const b2bService         = new B2BService(supabase);
 
 // Wompi habilitado solo si están las credenciales configuradas
@@ -1434,6 +1439,85 @@ async function manejarMensaje(telefono, mensaje, contexto = {}) {
     }
   } catch (errB2B) {
     console.warn('[Bot] Error verificando droguería B2B, continuando como cliente:', errB2B.message);
+  }
+
+  // ── Detección de calificación 1-5 (después de pedido entregado) ──────────
+  // Si el cliente recibió en los últimos 30 min una solicitud de calificación
+  // y ahora responde con "1", "2", "3", "4" o "5", la registramos.
+  if (/^[1-5]$/.test(mensajeLimpio.trim())) {
+    try {
+      const { data: pedidoPendiente } = await supabase
+        .from('pedidos')
+        .select('id, mensajero_id, calificacion_solicitada_at')
+        .eq('cliente_telefono', telefono)
+        .eq('status', 'entregado')
+        .not('calificacion_solicitada_at', 'is', null)
+        .order('entregado_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pedidoPendiente?.calificacion_solicitada_at) {
+        const minutos = (Date.now() - new Date(pedidoPendiente.calificacion_solicitada_at).getTime()) / 60000;
+        if (minutos < 30) {
+          const { data: yaExiste } = await supabase
+            .from('calificaciones')
+            .select('id')
+            .eq('pedido_id', pedidoPendiente.id)
+            .maybeSingle();
+          if (!yaExiste) {
+            await calificacionService.registrarCalificacion(
+              pedidoPendiente.id, telefono, parseInt(mensajeLimpio, 10), null
+            );
+            return `🙏 *¡Gracias por tu calificación!*\n\nTu opinión nos ayuda a mejorar 💊\n\n¿Quieres seguir comprando? Solo escríbeme el nombre del medicamento que necesitas.`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Bot] Error procesando calificación:', e.message);
+    }
+  }
+
+  // ── Consulta de puntos / lealtad ─────────────────────────────────────────
+  if (['puntos', 'mis puntos', 'saldo', 'lealtad', 'mis pts', 'pts'].includes(mensajeLimpio.toLowerCase())) {
+    try {
+      const datos = await lealtadService.consultarPuntos(telefono);
+      return (
+        `🎁 *Tu programa de lealtad*\n\n` +
+        `⭐ Puntos disponibles: *${datos.puntos_actuales}*\n` +
+        `💰 Equivalen a: $${(datos.puntos_actuales * 1000).toLocaleString('es-CO')}\n` +
+        `🛒 Pedidos completados: *${datos.pedidos_completados}*\n` +
+        `🏆 Total ganado: ${datos.puntos_totales_ganados} pts\n\n` +
+        (datos.codigo_referido
+          ? `🎟️ *Tu código de referido:*\n*${datos.codigo_referido}*\n\nCompártelo con amigos. Ganas *50 puntos* cuando un amigo hace su primera compra usando tu código 🎉\n\n`
+          : '') +
+        (datos.puede_canjear
+          ? `✅ Puedes canjear tus puntos en tu próxima compra (mín. 10 pts).`
+          : `Necesitas mínimo 10 puntos para canjear.`)
+      );
+    } catch (e) {
+      console.warn('[Bot] Error consultando puntos:', e.message);
+    }
+  }
+
+  // ── Aplicar código de referido (DV-XXXXXX) ────────────────────────────────
+  // Si el cliente escribe un código de referido, lo asociamos a su cuenta.
+  const matchReferido = mensajeLimpio.toUpperCase().match(/^DV-([A-Z0-9]{6})$/);
+  if (matchReferido) {
+    try {
+      const codigoRef = mensajeLimpio.toUpperCase().trim();
+      const referidor = await lealtadService.buscarPorCodigoReferido(codigoRef);
+      if (referidor && referidor.telefono !== telefono) {
+        await lealtadService.obtenerOCrearCliente(telefono, null, referidor.telefono);
+        return (
+          `🎉 *¡Código de referido aplicado!*\n\n` +
+          `Te invitó *${referidor.nombre || 'un amigo'}*.\n\n` +
+          `Cuando completes tu primera compra, *${referidor.nombre || 'tu amigo'}* recibirá 50 puntos de regalo 🎁\n\n` +
+          `Ahora cuéntame, ¿qué medicamento necesitas?`
+        );
+      }
+    } catch (e) {
+      console.warn('[Bot] Error procesando referido:', e.message);
+    }
   }
 
   // ── Seguimiento de pedidos (disponible para cualquier cliente) ───────────────

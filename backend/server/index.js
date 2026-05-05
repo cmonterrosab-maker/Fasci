@@ -1,6 +1,7 @@
 'use strict';
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -18,22 +19,34 @@ const MensajeroService = require('../services/mensajero-service');
 const FeeService = require('../services/fee-service');
 const WompiService = require('../services/wompi-service');
 const AsignacionService = require('../services/asignacion-service');
-const SecurityService = require('../services/security-service');
+const monitor = require('../services/monitor-service');
+const emailService = require('../services/email-service');
 const CacheService = require('../services/cache-service');
+const MetricasService = require('../services/metricas-service');
+const CalificacionService = require('../services/calificacion-service');
+const LealtadService = require('../services/lealtad-service');
 
 // ─── Inicialización ───────────────────────────────────────────────────────────
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
 
 // ─── Supabase ─────────────────────────────────────────────────────────────────
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('[Server] ERROR: SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no configurados.');
+  console.error('[Server] ERROR: SUPABASE_URL y una key de Supabase no configurados.');
   process.exit(1);
+}
+
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY && !process.env.SUPABASE_SERVICE_KEY) {
+  console.warn('[Server] ADVERTENCIA: usando SUPABASE_ANON_KEY. Para rutas admin usa SUPABASE_SERVICE_ROLE_KEY.');
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -49,8 +62,10 @@ const mensajeroService = new MensajeroService(supabase);
 const feeService = new FeeService(supabase);
 const wompiService = new WompiService(supabase);
 const asignacionService = new AsignacionService(supabase);
-const securityService = new SecurityService();
 const cacheService = new CacheService();
+const metricasService = new MetricasService(supabase);
+const calificacionService = new CalificacionService(supabase);
+const lealtadService = new LealtadService(supabase);
 
 // ─── Middleware de seguridad ──────────────────────────────────────────────────
 
@@ -798,6 +813,13 @@ app.post('/webhook/wompi', async (req, res) => {
           console.warn('[Wompi Webhook] Error registrando fee:', err.message);
         }
 
+        // ── Otorgar puntos de lealtad al cliente ──
+        try {
+          await lealtadService.otorgarPuntosCompra(pedidoId);
+        } catch (err) {
+          console.warn('[Wompi Webhook] Error otorgando puntos:', err.message);
+        }
+
         // ── Obtener datos del pedido para asignar mensajero ──
         const { data: pedido } = await supabase
           .from('pedidos')
@@ -818,19 +840,52 @@ app.post('/webhook/wompi', async (req, res) => {
             clienteTel:    pedido.cliente_telefono,
           });
 
-          // ── Notificar al cliente que su pago fue confirmado ──
+          // ── Notificar al cliente: WhatsApp + email + alerta interna ──
           if (pedido.cliente_telefono) {
             const { sendWhatsAppMessage } = require('../services/whatsapp-service');
             const mensajeroNombre   = resAsig?.mensajero?.nombre;
             const mensajeroTelefono = resAsig?.mensajero?.telefono;
             const etaTexto          = resAsig?.etaTexto || '30-45 minutos';
 
+            // WhatsApp al cliente
             let msg = `✅ *¡Pago confirmado!*\n\n📦 Pedido: *${pedido.numero_pedido}*\n\n`;
             if (mensajeroNombre) {
               msg += `🛵 Tu domiciliario: *${mensajeroNombre}*\n📞 ${mensajeroTelefono}\n\n`;
             }
             msg += `⏱️ Llega en *${etaTexto}*\n\n📍 Escribe *seguimiento* para rastrear en tiempo real.`;
             await sendWhatsAppMessage(pedido.cliente_telefono, msg).catch(() => {});
+
+            // Email de confirmación (si tenemos email del cliente)
+            const { data: pedidoCompleto } = await supabase
+              .from('pedidos')
+              .select('cliente_nombre, cliente_telefono, total, detalle_pedidos(nombre_medicamento, cantidad, subtotal)')
+              .eq('id', pedido.id)
+              .maybeSingle();
+
+            const emailCliente = transaccion?.customer_email
+              || `${(pedido.cliente_telefono || '').replace(/\D/g, '')}@drogueriavirtual.co`;
+
+            await emailService.confirmacionPedido({
+              email:        emailCliente,
+              nombre:       pedido.cliente_nombre,
+              numeroPedido: pedido.numero_pedido,
+              total:        pedidoCompleto?.total,
+              items:        (pedidoCompleto?.detalle_pedidos || []).map(d => ({
+                nombre:   d.nombre_medicamento,
+                cantidad: d.cantidad,
+                subtotal: d.subtotal,
+              })),
+              etaTexto,
+              mensajero: mensajeroNombre ? { nombre: mensajeroNombre, telefono: mensajeroTelefono } : null,
+            }).catch(() => {});
+
+            // Alerta interna al admin
+            await emailService.alertaPedidoNuevo({
+              numeroPedido:    pedido.numero_pedido,
+              total:           pedidoCompleto?.total,
+              clienteNombre:   pedido.cliente_nombre,
+              clienteTelefono: pedido.cliente_telefono,
+            }).catch(() => {});
           }
         } catch (err) {
           console.warn('[Wompi Webhook] Error en asignación turbo:', err.message);
@@ -965,6 +1020,295 @@ app.put('/api/fee/liquidaciones/:id/pagar', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// API MÉTRICAS — Dashboard en tiempo real
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/metricas/realtime — KPIs en vivo */
+app.get('/api/metricas/realtime', async (req, res) => {
+  try {
+    const stats = await metricasService.realtimeStats();
+    res.json({ success: true, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/metricas/pedidos-horas?horas=12 — Serie horaria */
+app.get('/api/metricas/pedidos-horas', async (req, res) => {
+  try {
+    const horas = parseInt(req.query.horas) || 12;
+    const data = await metricasService.pedidosUltimasHoras(horas);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/metricas/top-medicamentos?limite=10 — Top vendidos */
+app.get('/api/metricas/top-medicamentos', async (req, res) => {
+  try {
+    const data = await metricasService.topMedicamentos(parseInt(req.query.limite) || 10);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/metricas/embudo — Embudo de conversión del bot */
+app.get('/api/metricas/embudo', async (req, res) => {
+  try {
+    const data = await metricasService.embudoConversion();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/metricas/socio — Resumen del mes para el socio */
+app.get('/api/metricas/socio', async (req, res) => {
+  try {
+    const data = await metricasService.resumenSocio();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API OPERACIÓN EN VIVO (admin)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/mensajeros/live
+ * Lista todos los mensajeros con su estado en vivo:
+ *   - GPS actual + tiempo desde última actualización
+ *   - Pedido activo si tienen uno (con cliente y dirección)
+ *   - Stats: pedidos completados, calificación promedio
+ */
+app.get('/api/admin/mensajeros/live', async (req, res) => {
+  try {
+    const { data: mensajeros, error } = await supabase
+      .from('mensajeros')
+      .select(`
+        id, nombre, telefono, ciudad, zona, vehiculo, placa,
+        status, disponible, pedidos_completados, calificacion_promedio,
+        ultima_lat, ultima_lng, ultima_ubicacion_at, pedido_actual_id
+      `)
+      .order('disponible', { ascending: false });
+
+    if (error) throw error;
+
+    // Para cada mensajero con pedido activo, traer datos del pedido
+    const enriquecidos = await Promise.all((mensajeros || []).map(async m => {
+      let pedidoActivo = null;
+      if (m.pedido_actual_id) {
+        const { data: p } = await supabase
+          .from('pedidos')
+          .select('numero_pedido, cliente_nombre, cliente_telefono, cliente_direccion, status, total, created_at')
+          .eq('id', m.pedido_actual_id)
+          .maybeSingle();
+        pedidoActivo = p;
+      }
+
+      // Calcular minutos desde última actualización GPS
+      const minSinGPS = m.ultima_ubicacion_at
+        ? Math.round((Date.now() - new Date(m.ultima_ubicacion_at).getTime()) / 60000)
+        : null;
+
+      return { ...m, pedido_activo: pedidoActivo, min_sin_gps: minSinGPS };
+    }));
+
+    // Resumen
+    const resumen = {
+      total:        enriquecidos.length,
+      activos:      enriquecidos.filter(m => m.status === 'activo').length,
+      disponibles:  enriquecidos.filter(m => m.disponible && !m.pedido_actual_id).length,
+      ocupados:     enriquecidos.filter(m => m.pedido_actual_id).length,
+      con_gps_vivo: enriquecidos.filter(m => m.min_sin_gps !== null && m.min_sin_gps < 45).length,
+    };
+
+    res.json({ success: true, mensajeros: enriquecidos, resumen });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/conversaciones-activas
+ * Conversaciones del bot que están en algún paso del flujo (sesiones activas).
+ * Filtra por last_activity en últimos 30 min.
+ */
+app.get('/api/admin/conversaciones-activas', async (req, res) => {
+  try {
+    const treintaMinAtras = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+    const { data, error } = await supabase
+      .from('bot_sessions')
+      .select('telefono, estado, flujo, datos, drogueria_contexto_id, ultimo_pedido_id, created_at, updated_at')
+      .gte('updated_at', treintaMinAtras)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      total:           data?.length || 0,
+      conversaciones: data || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/inventario/global
+ * Vista admin del inventario completo de todas las droguerías:
+ *   - Total ítems en catálogo
+ *   - Valor total del inventario
+ *   - Alertas críticas (stock < 5)
+ *   - Sin stock
+ */
+app.get('/api/admin/inventario/global', async (req, res) => {
+  try {
+    const { data: catalogos, error } = await supabase
+      .from('catalogos')
+      .select(`
+        id, stock, precio, disponible, drogueria_id,
+        medicamentos(nombre, presentacion, categoria_id),
+        droguerias(nombre, ciudad)
+      `);
+
+    if (error) throw error;
+
+    const items = catalogos || [];
+    const valor_total = items.reduce((s, i) => s + (Number(i.stock) * Number(i.precio || 0)), 0);
+    const sin_stock   = items.filter(i => i.stock === 0);
+    const stock_bajo  = items.filter(i => i.stock > 0 && i.stock < 5);
+    const stock_normal = items.filter(i => i.stock >= 5);
+
+    // Top 10 críticos para acción
+    const criticos = sin_stock
+      .concat(stock_bajo)
+      .slice(0, 20)
+      .map(i => ({
+        nombre:      i.medicamentos?.nombre,
+        presentacion: i.medicamentos?.presentacion,
+        droguerias:  i.droguerias?.nombre,
+        ciudad:      i.droguerias?.ciudad,
+        stock:       i.stock,
+        precio:      i.precio,
+      }));
+
+    res.json({
+      success: true,
+      resumen: {
+        total_items:    items.length,
+        valor_total,
+        sin_stock_count:  sin_stock.length,
+        stock_bajo_count: stock_bajo.length,
+        stock_ok_count:   stock_normal.length,
+      },
+      criticos,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API CALIFICACIONES (rating de mensajeros)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/calificaciones/top-mensajeros — Top mensajeros por rating */
+app.get('/api/calificaciones/top-mensajeros', async (req, res) => {
+  try {
+    const data = await calificacionService.mensajerosTopRated(parseInt(req.query.limite) || 10);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/calificaciones/procesar-pendientes — Manual trigger del cron */
+app.post('/api/calificaciones/procesar-pendientes', async (req, res) => {
+  try {
+    const r = await calificacionService.procesarCalificacionesAutomatico();
+    res.json({ success: true, ...r });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/calificaciones/recientes — Últimas calificaciones */
+app.get('/api/calificaciones/recientes', async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('calificaciones')
+      .select('*, mensajeros(nombre), pedidos(numero_pedido)')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(req.query.limite) || 20);
+    res.json({ success: true, data: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API LEALTAD (puntos, referidos, cupones)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/lealtad/cliente/:telefono — Saldo y datos del cliente */
+app.get('/api/lealtad/cliente/:telefono', async (req, res) => {
+  try {
+    const data = await lealtadService.consultarPuntos(req.params.telefono);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/lealtad/top-clientes — Ranking de clientes por puntos */
+app.get('/api/lealtad/top-clientes', async (req, res) => {
+  try {
+    const data = await lealtadService.topClientesLealtad(parseInt(req.query.limite) || 10);
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/lealtad/cupones — Crear cupón */
+app.post('/api/lealtad/cupones', async (req, res) => {
+  try {
+    const data = await lealtadService.crearCupon(req.body);
+    res.status(201).json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/lealtad/cupones — Listar cupones */
+app.get('/api/lealtad/cupones', async (req, res) => {
+  try {
+    const data = await lealtadService.listarCupones();
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/lealtad/validar-cupon — Validar cupón antes de aplicar */
+app.post('/api/lealtad/validar-cupon', async (req, res) => {
+  try {
+    const { codigo, telefono, total, costoDomicilio } = req.body;
+    const r = await lealtadService.aplicarCupon(codigo, telefono, total, costoDomicilio);
+    res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HEALTH CHECK E INFO
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1014,10 +1358,18 @@ app.use((req, res) => {
   });
 });
 
-// Error handler global
+// Error handler global con captura en Sentry
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[Server] Error no manejado:', err.message, err.stack);
+
+  // Capturar en monitor (Sentry + alertas)
+  monitor.capturarError(err, {
+    url:    req.url,
+    method: req.method,
+    body:   req.body,
+  });
+
   res.status(err.status || 500).json({
     error: err.message || 'Error interno del servidor.',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
@@ -1025,12 +1377,32 @@ app.use((err, req, res, next) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CRONS PROGRAMADOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const cron = require('node-cron');
+
+// Cada 5 minutos: pedir calificación a pedidos entregados hace +5 min
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    const r = await calificacionService.procesarCalificacionesAutomatico();
+    if (r?.solicitadas > 0) {
+      console.log(`[Cron] Calificaciones solicitadas: ${r.solicitadas}`);
+    }
+  } catch (err) {
+    console.error('[Cron] Error procesando calificaciones:', err.message);
+  }
+});
+
+console.log('[Server] Cron de calificaciones programado (cada 5 min)');
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ARRANQUE DEL SERVIDOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log('='.repeat(60));
-  console.log(`[Server] Drogueria Virtual API corriendo en puerto ${PORT}`);
+  console.log(`[Server] Drogueria Virtual API corriendo en ${HOST}:${PORT}`);
   console.log(`[Server] Entorno: ${process.env.NODE_ENV || 'development'}`);
   console.log(`[Server] Health check: http://localhost:${PORT}/health`);
   console.log(`[Server] Webhook WhatsApp: POST http://localhost:${PORT}/webhook/whatsapp`);

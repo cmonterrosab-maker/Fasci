@@ -79,7 +79,8 @@ export default function AdminPedidos() {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/pedidos');
-        setPedidos(res.data);
+        const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.pedidos ?? []);
+        setPedidos(data);
       } catch {}
       finally { setLoading(false); }
     };

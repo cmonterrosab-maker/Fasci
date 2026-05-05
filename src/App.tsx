@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DrogueriaAuthProvider, useDrogueriaAuth } from './contexts/DrogueriaAuthContext';
 import { AdminAuthProvider, useAdminAuth } from './contexts/AdminAuthContext';
@@ -15,6 +15,10 @@ import AdminDashboard from './pages/admin/Dashboard';
 import AdminDroguerias from './pages/admin/Droguerias';
 import AdminMedicamentos from './pages/admin/Medicamentos';
 import AdminPedidos from './pages/admin/Pedidos';
+import MetricasRealtime from './pages/admin/MetricasRealtime';
+import MensajerosLive from './pages/admin/MensajerosLive';
+import Conversaciones from './pages/admin/Conversaciones';
+import CuponesLealtad from './pages/admin/CuponesLealtad';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,81 +65,135 @@ function ProtectedAdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function DrogueriaAuthLayout() {
+  return (
+    <DrogueriaAuthProvider>
+      <Outlet />
+    </DrogueriaAuthProvider>
+  );
+}
+
+function AdminAuthLayout() {
+  return (
+    <AdminAuthProvider>
+      <Outlet />
+    </AdminAuthProvider>
+  );
+}
+
 function AppRoutes() {
   return (
     <Routes>
       {/* Publica */}
       <Route path="/" element={<Index />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/admin/login" element={<AdminLogin />} />
 
-      {/* Drogueria - protegidas */}
-      <Route
-        path="/drogueria/dashboard"
-        element={
-          <ProtectedDrogueriaRoute>
-            <DrogueriaDashboard />
-          </ProtectedDrogueriaRoute>
-        }
-      />
-      <Route
-        path="/drogueria/catalogo"
-        element={
-          <ProtectedDrogueriaRoute>
-            <DrogueriaCatalogo />
-          </ProtectedDrogueriaRoute>
-        }
-      />
-      <Route
-        path="/drogueria/pedidos"
-        element={
-          <ProtectedDrogueriaRoute>
-            <DrogueriaPedidos />
-          </ProtectedDrogueriaRoute>
-        }
-      />
-      <Route
-        path="/drogueria/inventario"
-        element={
-          <ProtectedDrogueriaRoute>
-            <DrogueriaInventario />
-          </ProtectedDrogueriaRoute>
-        }
-      />
+      <Route element={<DrogueriaAuthLayout />}>
+        <Route path="/login" element={<Login />} />
 
-      {/* Admin - protegidas */}
-      <Route
-        path="/admin/dashboard"
-        element={
-          <ProtectedAdminRoute>
-            <AdminDashboard />
-          </ProtectedAdminRoute>
-        }
-      />
-      <Route
-        path="/admin/droguerias"
-        element={
-          <ProtectedAdminRoute>
-            <AdminDroguerias />
-          </ProtectedAdminRoute>
-        }
-      />
-      <Route
-        path="/admin/medicamentos"
-        element={
-          <ProtectedAdminRoute>
-            <AdminMedicamentos />
-          </ProtectedAdminRoute>
-        }
-      />
-      <Route
-        path="/admin/pedidos"
-        element={
-          <ProtectedAdminRoute>
-            <AdminPedidos />
-          </ProtectedAdminRoute>
-        }
-      />
+        {/* Drogueria - protegidas */}
+        <Route
+          path="/drogueria/dashboard"
+          element={
+            <ProtectedDrogueriaRoute>
+              <DrogueriaDashboard />
+            </ProtectedDrogueriaRoute>
+          }
+        />
+        <Route
+          path="/drogueria/catalogo"
+          element={
+            <ProtectedDrogueriaRoute>
+              <DrogueriaCatalogo />
+            </ProtectedDrogueriaRoute>
+          }
+        />
+        <Route
+          path="/drogueria/pedidos"
+          element={
+            <ProtectedDrogueriaRoute>
+              <DrogueriaPedidos />
+            </ProtectedDrogueriaRoute>
+          }
+        />
+        <Route
+          path="/drogueria/inventario"
+          element={
+            <ProtectedDrogueriaRoute>
+              <DrogueriaInventario />
+            </ProtectedDrogueriaRoute>
+          }
+        />
+      </Route>
+
+      <Route element={<AdminAuthLayout />}>
+        <Route path="/admin/login" element={<AdminLogin />} />
+
+        {/* Admin - protegidas */}
+        <Route
+          path="/admin/dashboard"
+          element={
+            <ProtectedAdminRoute>
+              <AdminDashboard />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/droguerias"
+          element={
+            <ProtectedAdminRoute>
+              <AdminDroguerias />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/medicamentos"
+          element={
+            <ProtectedAdminRoute>
+              <AdminMedicamentos />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/pedidos"
+          element={
+            <ProtectedAdminRoute>
+              <AdminPedidos />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/metricas"
+          element={
+            <ProtectedAdminRoute>
+              <MetricasRealtime />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/mensajeros"
+          element={
+            <ProtectedAdminRoute>
+              <MensajerosLive />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/conversaciones"
+          element={
+            <ProtectedAdminRoute>
+              <Conversaciones />
+            </ProtectedAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/lealtad"
+          element={
+            <ProtectedAdminRoute>
+              <CuponesLealtad />
+            </ProtectedAdminRoute>
+          }
+        />
+      </Route>
 
       {/* Catch-all */}
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -146,13 +204,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <DrogueriaAuthProvider>
-        <AdminAuthProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </AdminAuthProvider>
-      </DrogueriaAuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }

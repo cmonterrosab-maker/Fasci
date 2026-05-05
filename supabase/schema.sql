@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS categorias_medicamentos (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS medicamentos (
   id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  nombre                VARCHAR(255) NOT NULL,
+  nombre                VARCHAR(255) NOT NULL UNIQUE,
   nombre_generico       VARCHAR(255),
   laboratorio           VARCHAR(255),
   presentacion          VARCHAR(100),   -- Tabletas, Jarabe, Inyectable, etc.
@@ -631,3 +631,158 @@ ALTER TABLE pedidos
     'pendiente', 'pendiente_pago', 'confirmado', 'en_preparacion',
     'en_camino', 'entregado', 'cancelado'
   ));
+
+-- ============================================
+-- CALIFICACIONES (rating de mensajeros)
+-- ============================================
+CREATE TABLE IF NOT EXISTS calificaciones (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  pedido_id       UUID REFERENCES pedidos(id) ON DELETE CASCADE,
+  mensajero_id    UUID REFERENCES mensajeros(id),
+  cliente_telefono VARCHAR(50) NOT NULL,
+  estrellas       INTEGER NOT NULL CHECK (estrellas BETWEEN 1 AND 5),
+  comentario      TEXT,
+  pedido_solicitado_at TIMESTAMPTZ,    -- cuando el bot pidió la calificación
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (pedido_id)                    -- una calificación por pedido
+);
+
+CREATE INDEX IF NOT EXISTS idx_calificaciones_mensajero ON calificaciones(mensajero_id);
+CREATE INDEX IF NOT EXISTS idx_calificaciones_estrellas ON calificaciones(estrellas);
+
+-- Trigger: actualizar promedio del mensajero cuando llega una calificación
+CREATE OR REPLACE FUNCTION actualizar_promedio_mensajero()
+RETURNS TRIGGER AS $$
+BEGIN
+  UPDATE mensajeros m
+  SET calificacion_promedio = (
+    SELECT ROUND(AVG(estrellas)::numeric, 2)
+    FROM calificaciones
+    WHERE mensajero_id = m.id
+  )
+  WHERE m.id = NEW.mensajero_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS calificacion_actualiza_promedio ON calificaciones;
+CREATE TRIGGER calificacion_actualiza_promedio
+  AFTER INSERT ON calificaciones
+  FOR EACH ROW EXECUTE FUNCTION actualizar_promedio_mensajero();
+
+-- Marca en pedidos si ya se pidió calificación
+ALTER TABLE pedidos
+  ADD COLUMN IF NOT EXISTS calificacion_solicitada_at TIMESTAMPTZ;
+
+-- ============================================
+-- LEALTAD: PUNTOS Y REFERIDOS
+-- ============================================
+
+-- Saldo de puntos por cliente (1 punto = $1.000 COP)
+CREATE TABLE IF NOT EXISTS clientes_lealtad (
+  telefono       VARCHAR(50) PRIMARY KEY,
+  nombre         VARCHAR(255),
+  puntos_actuales INTEGER DEFAULT 0,
+  puntos_totales_ganados INTEGER DEFAULT 0,
+  pedidos_completados   INTEGER DEFAULT 0,
+  codigo_referido VARCHAR(20) UNIQUE,
+  referido_por    VARCHAR(50),  -- teléfono del referidor
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Histórico de movimientos de puntos
+CREATE TABLE IF NOT EXISTS movimientos_puntos (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  telefono    VARCHAR(50) NOT NULL,
+  tipo        VARCHAR(30) NOT NULL CHECK (tipo IN (
+    'gana_compra', 'gana_referido', 'canje', 'expiracion', 'ajuste_admin'
+  )),
+  puntos      INTEGER NOT NULL,        -- positivo o negativo
+  pedido_id   UUID REFERENCES pedidos(id),
+  descripcion TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_telefono ON movimientos_puntos(telefono);
+CREATE INDEX IF NOT EXISTS idx_movimientos_tipo     ON movimientos_puntos(tipo);
+
+-- Cupones aplicables a pedidos
+CREATE TABLE IF NOT EXISTS cupones (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  codigo       VARCHAR(20) UNIQUE NOT NULL,
+  tipo         VARCHAR(20) CHECK (tipo IN ('porcentaje', 'monto_fijo', 'envio_gratis')),
+  valor        DECIMAL(10,2),           -- 10 = 10% si tipo=porcentaje, 5000 si monto_fijo
+  uso_maximo   INTEGER DEFAULT 1,       -- cuántas veces puede usarse globalmente
+  usos_actuales INTEGER DEFAULT 0,
+  vigente_hasta DATE,
+  para_telefono VARCHAR(50),            -- si es exclusivo de un cliente (NULL = todos)
+  activo       BOOLEAN DEFAULT true,
+  descripcion  TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cupones_codigo ON cupones(codigo) WHERE activo = true;
+
+-- Marca en pedidos para guardar cupón aplicado
+ALTER TABLE pedidos
+  ADD COLUMN IF NOT EXISTS cupon_aplicado VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS descuento_cupon DECIMAL(10,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS puntos_canjeados INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS descuento_puntos DECIMAL(10,2) DEFAULT 0;
+
+-- Función para generar código de referido único
+CREATE OR REPLACE FUNCTION generar_codigo_referido()
+RETURNS TEXT AS $$
+DECLARE
+  caracteres TEXT := 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  codigo     TEXT := '';
+  i          INTEGER;
+BEGIN
+  FOR i IN 1..6 LOOP
+    codigo := codigo || substring(caracteres FROM (floor(random() * length(caracteres))::int + 1) FOR 1);
+  END LOOP;
+  RETURN 'DV-' || codigo;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- ADMINS — Acceso al panel administrativo
+-- Vinculados a auth.users de Supabase
+-- ============================================
+CREATE TABLE IF NOT EXISTS admins (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id     UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+  email       VARCHAR(255) UNIQUE NOT NULL,
+  nombre      VARCHAR(255) NOT NULL,
+  rol         VARCHAR(20) NOT NULL DEFAULT 'admin'
+              CHECK (rol IN ('super_admin', 'admin', 'soporte', 'operativo')),
+  activo      BOOLEAN DEFAULT true,
+  ultimo_login TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER set_timestamp_admins
+  BEFORE UPDATE ON admins
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+
+CREATE INDEX IF NOT EXISTS idx_admins_email ON admins(email);
+CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins(user_id);
+
+-- RLS para que solo admins puedan leer admins
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins ven admins"
+  ON admins FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid())
+  );
+
+CREATE POLICY "Super admins gestionan admins"
+  ON admins FOR ALL
+  TO authenticated
+  USING (
+    EXISTS (SELECT 1 FROM admins a WHERE a.user_id = auth.uid() AND a.rol = 'super_admin')
+  );

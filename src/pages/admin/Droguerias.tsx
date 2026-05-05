@@ -56,7 +56,8 @@ export default function AdminDroguerias() {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/droguerias');
-        setDroguerias(res.data);
+        const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
+        setDroguerias(data);
       } catch {
         // usar mock
       } finally {
@@ -163,7 +164,7 @@ export default function AdminDroguerias() {
                   </tr>
                 ) : (
                   paginadas.map((d) => {
-                    const estadoConf = ESTADO_CONFIG[d.estado];
+                    const estadoConf = ESTADO_CONFIG[d.estado] ?? { label: d.estado ?? 'Desconocido', color: 'bg-gray-100 text-gray-800' };
                     return (
                       <tr key={d.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4">

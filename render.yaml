@@ -103,3 +103,41 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # ── CRON: Backup diario de Supabase ───────────────────────────────────────
+  - type: cron
+    name: drogueria-backup-diario
+    runtime: node
+    region: oregon
+    plan: starter
+    schedule: "0 4 * * *"   # 04:00 UTC = 23:00 Colombia
+    buildCommand: cd backend && npm install --production
+    startCommand: cd backend && node ../scripts/backup-supabase.js
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # ── Supabase (heredan los mismos valores que drogueria-api) ─────────
+      - key: SUPABASE_URL
+        sync: false
+
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+
+      # ── AWS S3 (opcional — si están vacías el backup queda solo local) ──
+      - key: AWS_BACKUP_BUCKET
+        sync: false
+
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+
+      - key: AWS_REGION
+        value: us-east-1
+
+      # Conservar últimos 30 backups locales
+      - key: BACKUP_RETENTION
+        value: "30"

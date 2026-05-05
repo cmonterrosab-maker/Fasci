@@ -1,0 +1,21 @@
+nombre,nombre_generico,laboratorio,presentacion,concentracion,categoria,requiere_formula,codigo_cum,precio,precio_mayorista,stock,cantidad_minima_mayorista
+Acetaminofén 500mg,Paracetamol,Genfar,Tabletas x10,500mg,Analgésicos,false,19900001-1,8500,6800,200,30
+Ibuprofeno 400mg,Ibuprofeno,MK,Tabletas x10,400mg,Antiinflamatorios,false,19900002-1,12000,9600,150,24
+Amoxicilina 500mg,Amoxicilina,Genfar,Cápsulas x21,500mg,Antibióticos,true,19900003-1,18500,14800,80,12
+Loratadina 10mg,Loratadina,MK,Tabletas x10,10mg,Antihistamínicos,false,19900004-1,9500,7600,100,24
+Omeprazol 20mg,Omeprazol,Genfar,Cápsulas x14,20mg,Digestivos,false,19900005-1,15000,12000,90,12
+Diclofenaco 50mg,Diclofenaco,MK,Tabletas x20,50mg,Antiinflamatorios,false,19900006-1,11000,8800,120,24
+Vitamina C 500mg,Ácido ascórbico,Tecnoquímicas,Tabletas masticables x30,500mg,Vitaminas,false,19900007-1,18000,14400,75,12
+Sulfato Ferroso,Hierro,Lafrancol,Tabletas x30,300mg,Vitaminas,false,19900008-1,12500,10000,60,12
+Acetaminofén Jarabe,Paracetamol,MK,Frasco 60ml,160mg/5ml,Analgésicos,false,19900009-1,12000,9600,80,12
+Loperamida 2mg,Loperamida,Genfar,Tabletas x10,2mg,Digestivos,false,19900010-1,7500,6000,100,24
+Salbutamol Inhalador,Salbutamol,Lafrancol,Inhalador 200 dosis,100mcg,Respiratorios,true,19900011-1,28000,22400,40,6
+Hidrocortisona Crema,Hidrocortisona,MK,Crema 30g,1%,Dermatológicos,false,19900012-1,14500,11600,55,12
+Naproxeno 500mg,Naproxeno,Genfar,Tabletas x10,500mg,Antiinflamatorios,false,19900013-1,13500,10800,90,24
+Captopril 25mg,Captopril,MK,Tabletas x30,25mg,Cardiovasculares,true,19900014-1,16000,12800,50,12
+Metformina 850mg,Metformina,Genfar,Tabletas x30,850mg,Otros,true,19900015-1,18500,14800,70,12
+Cetirizina 10mg,Cetirizina,Tecnoquímicas,Tabletas x10,10mg,Antihistamínicos,false,19900016-1,10500,8400,85,24
+Ranitidina 150mg,Ranitidina,MK,Tabletas x20,150mg,Digestivos,false,19900017-1,13000,10400,75,12
+Aciclovir Crema,Aciclovir,Genfar,Crema 5g,5%,Dermatológicos,false,19900018-1,15500,12400,40,12
+Multivitamínico Adulto,Multivitamínico,Tecnoquímicas,Tabletas x30,Estándar,Vitaminas,false,19900019-1,32000,25600,45,6
+Sales de rehidratación,Electrolitos,MK,Sobres x6,Estándar,Otros,false,19900020-1,8500,6800,150,30
