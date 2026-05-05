@@ -1,19 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
-  Search,
-  CheckCircle,
-  XCircle,
-  MapPin,
-  Phone,
-  Mail,
-  Loader2,
-  Store,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
+  Search, CheckCircle, XCircle, MapPin, Phone, Mail,
+  Loader2, Store, ChevronLeft, ChevronRight, Filter, Plus, X,
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
+
+const FORM_VACIO = { nombre: '', email: '', telefono: '', ciudad: 'Cartagena', direccion: '', barrio: '', nit: '' };
 
 interface Drogueria {
   id: string;
@@ -88,6 +81,27 @@ export default function AdminDroguerias() {
   const totalPages = Math.ceil(filtradas.length / PAGE_SIZE);
   const paginadas = filtradas.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState(FORM_VACIO);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  const registrar = async () => {
+    if (!form.nombre || !form.telefono || !form.ciudad) return;
+    setSaving(true); setSaveError('');
+    try {
+      await axios.post('/api/admin/droguerias', form);
+      setShowModal(false);
+      setForm(FORM_VACIO);
+      // Recargar lista
+      const res = await axios.get('/api/admin/droguerias');
+      const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
+      setDroguerias(data);
+    } catch (err: any) {
+      setSaveError(err?.response?.data?.error || 'Error al registrar');
+    } finally { setSaving(false); }
+  };
+
   const pendientesCount = droguerias.filter(d => d.estado === 'pendiente').length;
 
   return (
@@ -105,7 +119,68 @@ export default function AdminDroguerias() {
               )}
             </p>
           </div>
+          <button onClick={() => { setShowModal(true); setSaveError(''); }}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
+            <Plus className="h-4 w-4" /> Registrar droguería
+          </button>
         </div>
+
+        {/* Modal Registrar Droguería */}
+        {showModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold text-gray-900">Registrar droguería</h2>
+                <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium text-gray-700">Nombre *</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.nombre}
+                      onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Droguería La Salud" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Teléfono / WhatsApp *</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.telefono}
+                      onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="3001234567" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Ciudad *</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.ciudad}
+                      onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium text-gray-700">Dirección</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.direccion}
+                      onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))} placeholder="Calle 50 #30-25" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Email</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.email}
+                      onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="drogueria@mail.com" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">NIT</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.nit}
+                      onChange={e => setForm(f => ({ ...f, nit: e.target.value }))} placeholder="900123456-1" />
+                  </div>
+                </div>
+                {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+              </div>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowModal(false)}
+                  className="flex-1 border border-gray-300 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-50">
+                  Cancelar
+                </button>
+                <button onClick={registrar} disabled={saving || !form.nombre || !form.telefono}
+                  className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                  {saving ? 'Guardando...' : 'Registrar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Filtros */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">

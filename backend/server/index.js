@@ -270,6 +270,38 @@ app.get('/api/admin/droguerias', async (req, res) => {
 });
 
 /**
+ * POST /api/admin/droguerias
+ * Registrar una nueva droguería.
+ */
+app.post('/api/admin/droguerias', async (req, res) => {
+  try {
+    const { nombre, email, telefono, whatsapp_numero, ciudad, direccion, barrio, nit } = req.body;
+    if (!nombre || !telefono || !ciudad) {
+      return res.status(400).json({ error: 'nombre, telefono y ciudad son requeridos.' });
+    }
+    const { data, error } = await supabase
+      .from('droguerias')
+      .insert({
+        nombre:          nombre.trim(),
+        email:           email?.trim() || null,
+        telefono:        telefono.trim().replace(/\D/g,'').slice(-10),
+        whatsapp_numero: (whatsapp_numero || telefono).trim().replace(/\D/g,'').slice(-10),
+        ciudad:          ciudad.trim(),
+        direccion:       direccion?.trim() || null,
+        barrio:          barrio?.trim() || null,
+        nit:             nit?.trim() || null,
+        status:          'pendiente',
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json({ success: true, drogueria: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * PUT /api/admin/droguerias/:id/status
  * Aprobar o suspender una droguería.
  * Body: { status: 'activo' | 'suspendido' | 'pendiente' }
@@ -338,6 +370,56 @@ app.get('/api/admin/pedidos', async (req, res) => {
   } catch (error) {
     console.error('[Admin] Error al listar pedidos:', error.message);
     res.status(500).json({ error: 'Error al obtener pedidos.' });
+  }
+});
+
+/** PATCH /api/admin/pedidos/:id/mensajero — Reasignar mensajero */
+app.patch('/api/admin/pedidos/:id/mensajero', async (req, res) => {
+  try {
+    const { mensajeroId } = req.body;
+    if (!mensajeroId) return res.status(400).json({ error: 'mensajeroId requerido.' });
+
+    // Verificar que el mensajero existe
+    const { data: mens, error: errMens } = await supabase
+      .from('mensajeros').select('id, nombre, telefono').eq('id', mensajeroId).single();
+    if (errMens || !mens) return res.status(404).json({ error: 'Mensajero no encontrado.' });
+
+    const { data, error } = await supabase
+      .from('pedidos')
+      .update({ mensajero_id: mensajeroId, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select('id, numero_pedido, status, cliente_telefono, cliente_nombre')
+      .single();
+    if (error) throw error;
+
+    // Notificar al mensajero por WhatsApp
+    try {
+      await mensajeroService.notificarAsignacion(mens, data);
+    } catch (e) { console.warn('[Admin] No se pudo notificar al mensajero:', e.message); }
+
+    res.json({ success: true, pedido: data, mensajero: mens });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** PATCH /api/admin/pedidos/:id/status — Cambiar status */
+app.patch('/api/admin/pedidos/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const permitidos = ['pendiente','confirmado','en_preparacion','en_camino','entregado','cancelado'];
+    if (!permitidos.includes(status)) return res.status(400).json({ error: 'Status inválido.' });
+
+    const { data, error } = await supabase
+      .from('pedidos')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select('id, numero_pedido, status, cliente_telefono')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, pedido: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
