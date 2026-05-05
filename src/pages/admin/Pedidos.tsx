@@ -79,7 +79,18 @@ export default function AdminPedidos() {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/pedidos');
-        const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.pedidos ?? []);
+        const raw: any[] = Array.isArray(res.data) ? res.data : (res.data?.pedidos ?? res.data?.data ?? []);
+        const data: PedidoAdmin[] = raw.map(p => ({
+          id:         p.id,
+          numero:     p.numero_pedido ?? p.numero ?? `#${p.id?.slice(0,6)}`,
+          drogueria:  p.droguerias?.nombre ?? p.drogueria ?? 'Bot WhatsApp',
+          ciudad:     p.droguerias?.ciudad ?? p.ciudad ?? '—',
+          cliente:    p.cliente_nombre ?? p.cliente ?? 'Cliente',
+          total:      p.total ?? 0,
+          estado:     p.status ?? p.estado ?? 'pendiente',
+          itemsCount: p.itemsCount ?? 0,
+          createdAt:  p.created_at ?? p.createdAt ?? new Date().toISOString(),
+        }));
         setPedidos(data);
       } catch {}
       finally { setLoading(false); }
