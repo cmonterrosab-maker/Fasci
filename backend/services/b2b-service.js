@@ -328,7 +328,7 @@ class B2BService {
           compradora_lat: compradoraLat || null,
           compradora_lng: compradoraLng || null,
           compradora_nit: compradoraNit || null,
-          status: 'pagada',
+          status: 'pago_pendiente',
           subtotal: Math.round(subtotal * 100) / 100,
           descuento: Math.round(descuento * 100) / 100,
           total: Math.round(total * 100) / 100,
@@ -338,7 +338,6 @@ class B2BService {
           tc_aceptado_at: new Date().toISOString(),
           canal: 'whatsapp',
           notas: notas || null,
-          pagada_at: new Date().toISOString(),
         })
         .select()
         .single();

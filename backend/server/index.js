@@ -1474,7 +1474,7 @@ app.get('/api/admin/ordenes-compra', async (req, res) => {
       .from('ordenes_compra')
       .select(`
         id, numero_orden, status, subtotal, descuento, total,
-        metodo_pago, canal, notas, created_at, pagada_at, entregada_at,
+        metodo_pago, canal, notas, comprobante_url, created_at, pagada_at, entregada_at,
         compradora_nombre, compradora_telefono, compradora_nit,
         drogueria_compradora_id,
         droguerias!drogueria_compradora_id (nombre, ciudad),
@@ -1494,6 +1494,124 @@ app.get('/api/admin/ordenes-compra', async (req, res) => {
     res.json({ ordenes: data, total: count, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
     console.error('[Admin] Error listando órdenes compra B2B:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/ordenes-compra/:id/aprobar
+ * Aprueba una orden pago_pendiente: marca pagada, asigna mensajero, notifica droguería.
+ */
+app.post('/api/admin/ordenes-compra/:id/aprobar', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: orden, error: errOrden } = await supabase
+      .from('ordenes_compra')
+      .select('id, numero_orden, status, total, compradora_telefono, compradora_nombre, compradora_lat, compradora_lng, drogueria_compradora_id, droguerias!drogueria_compradora_id(nombre, ciudad)')
+      .eq('id', id)
+      .single();
+
+    if (errOrden || !orden) return res.status(404).json({ error: 'Orden no encontrada' });
+    if (orden.status !== 'pago_pendiente') {
+      return res.status(400).json({ error: `La orden está en estado "${orden.status}", no se puede aprobar` });
+    }
+
+    // Marcar como pagada
+    const { error: errUpd } = await supabase
+      .from('ordenes_compra')
+      .update({ status: 'pagada', pagada_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (errUpd) throw errUpd;
+
+    // Asignar mensajero B2B
+    let mensajeroNombre = null;
+    let mensajeroTel = null;
+    try {
+      const ciudad = orden.droguerias?.ciudad || null;
+      const resAsig = await asignacionService.asignarNormalB2B({
+        ordenId: id,
+        ciudad,
+        compradoraLat: orden.compradora_lat,
+        compradoraLng: orden.compradora_lng,
+        compradoraNombre: orden.compradora_nombre || orden.droguerias?.nombre,
+        compradoraTel: orden.compradora_telefono,
+      });
+      if (resAsig.success && resAsig.mensajero) {
+        mensajeroNombre = resAsig.mensajero.nombre;
+        mensajeroTel = resAsig.mensajero.telefono;
+      }
+    } catch (errAsig) {
+      console.warn('[Admin] Error asignando mensajero B2B:', errAsig.message);
+    }
+
+    // Notificar a la droguería compradora
+    if (orden.compradora_telefono) {
+      const msg = [
+        `✅ *¡Pago aprobado!*`,
+        ``,
+        `Tu orden *${orden.numero_orden}* ha sido verificada y aprobada.`,
+        `💰 Total: $${Number(orden.total).toLocaleString('es-CO')}`,
+        ``,
+        mensajeroNombre
+          ? `📦 Domiciliario asignado: *${mensajeroNombre}*\n📞 ${mensajeroTel}`
+          : `🛵 Estamos asignando el transporte. Te avisamos pronto.`,
+        ``,
+        `⏱️ Tiempo estimado de entrega: *2-4 horas*`,
+        `📍 Escribe *${orden.numero_orden}* para ver el estado.`,
+      ].join('\n');
+      sendWhatsAppMessage(orden.compradora_telefono, msg)
+        .catch(e => console.warn('[Admin] No se pudo notificar droguería:', e.message));
+    }
+
+    res.json({ success: true, mensajero: mensajeroNombre ? { nombre: mensajeroNombre, telefono: mensajeroTel } : null });
+  } catch (err) {
+    console.error('[Admin] Error aprobando orden B2B:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/ordenes-compra/:id/rechazar
+ * Rechaza una orden pago_pendiente y notifica a la droguería.
+ */
+app.post('/api/admin/ordenes-compra/:id/rechazar', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { motivo } = req.body;
+
+    const { data: orden, error: errOrden } = await supabase
+      .from('ordenes_compra')
+      .select('id, numero_orden, status, compradora_telefono')
+      .eq('id', id)
+      .single();
+
+    if (errOrden || !orden) return res.status(404).json({ error: 'Orden no encontrada' });
+    if (orden.status !== 'pago_pendiente') {
+      return res.status(400).json({ error: `La orden está en estado "${orden.status}", no se puede rechazar` });
+    }
+
+    const { error: errUpd } = await supabase
+      .from('ordenes_compra')
+      .update({ status: 'cancelada', notas: motivo ? `Rechazada: ${motivo}` : 'Rechazada por el operario', updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (errUpd) throw errUpd;
+
+    if (orden.compradora_telefono) {
+      const msg = [
+        `❌ *Orden ${orden.numero_orden} rechazada*`,
+        ``,
+        motivo ? `Motivo: ${motivo}` : `El comprobante no pudo ser verificado.`,
+        ``,
+        `Por favor comunícate con nosotros para resolver el inconveniente o intenta hacer un nuevo pedido.`,
+      ].join('\n');
+      sendWhatsAppMessage(orden.compradora_telefono, msg)
+        .catch(e => console.warn('[Admin] No se pudo notificar droguería:', e.message));
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Admin] Error rechazando orden B2B:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

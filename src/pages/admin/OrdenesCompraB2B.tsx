@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Package, ChevronLeft, ChevronRight, RefreshCw,
   Building2, Phone, Calendar, ChevronDown, ChevronUp,
-  Brain, Bell,
+  Brain, Bell, CheckCircle, XCircle, ImageIcon, Clock,
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
 
@@ -41,6 +41,7 @@ interface OrdenCompra {
   descuento: number;
   total: number;
   metodo_pago: string;
+  comprobante_url: string | null;
   created_at: string;
   compradora_nombre: string;
   compradora_telefono: string;
@@ -59,6 +60,8 @@ export default function OrdenesCompraB2B() {
   const [filtroStatus, setFiltroStatus] = useState('');
   const [expandido, setExpandido] = useState<string | null>(null);
   const [cambiandoStatus, setCambiandoStatus] = useState<string | null>(null);
+  const [aprobando, setAprobando] = useState<string | null>(null);
+  const [rechazando, setRechazando] = useState<string | null>(null);
   const [perfiles, setPerfiles] = useState<any[]>([]);
   const [showPerfiles, setShowPerfiles] = useState(false);
   const [enviandoAlertas, setEnviandoAlertas] = useState(false);
@@ -90,6 +93,32 @@ export default function OrdenesCompraB2B() {
       console.error(e);
     } finally {
       setCambiandoStatus(null);
+    }
+  };
+
+  const aprobar = async (id: string) => {
+    setAprobando(id);
+    try {
+      await axios.post(`/api/admin/ordenes-compra/${id}/aprobar`);
+      setOrdenes(prev => prev.map(o => o.id === id ? { ...o, status: 'pagada' } : o));
+    } catch (e: any) {
+      alert(e?.response?.data?.error || 'Error al aprobar');
+    } finally {
+      setAprobando(null);
+    }
+  };
+
+  const rechazar = async (id: string) => {
+    const motivo = prompt('Motivo del rechazo (opcional):');
+    if (motivo === null) return; // canceló el prompt
+    setRechazando(id);
+    try {
+      await axios.post(`/api/admin/ordenes-compra/${id}/rechazar`, { motivo });
+      setOrdenes(prev => prev.map(o => o.id === id ? { ...o, status: 'cancelada' } : o));
+    } catch (e: any) {
+      alert(e?.response?.data?.error || 'Error al rechazar');
+    } finally {
+      setRechazando(null);
     }
   };
 
@@ -140,6 +169,19 @@ export default function OrdenesCompraB2B() {
             </button>
           </div>
         </div>
+
+        {/* Banner de órdenes pendientes de aprobación */}
+        {ordenes.filter(o => o.status === 'pago_pendiente').length > 0 && (
+          <div className="mb-5 rounded-xl border border-yellow-200 bg-yellow-50 px-5 py-4 flex items-center gap-3">
+            <Clock className="h-5 w-5 text-yellow-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-yellow-800">
+                {ordenes.filter(o => o.status === 'pago_pendiente').length} orden(es) pendiente(s) de aprobación
+              </p>
+              <p className="text-xs text-yellow-600 mt-0.5">Revisar comprobante de pago y aprobar o rechazar.</p>
+            </div>
+          </div>
+        )}
 
         {alertaResultado && (
           <div className="mb-4 px-4 py-3 rounded-lg bg-green-50 text-green-800 text-sm border border-green-200">
@@ -284,16 +326,37 @@ export default function OrdenesCompraB2B() {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2">
-                            <select
-                              value={o.status}
-                              disabled={cambiandoStatus === o.id}
-                              onChange={e => cambiarStatus(o.id, e.target.value)}
-                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 disabled:opacity-50"
-                            >
-                              {STATUS_ORDEN.map(s => (
-                                <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
-                              ))}
-                            </select>
+                            {o.status === 'pago_pendiente' ? (
+                              <>
+                                <button
+                                  onClick={() => aprobar(o.id)}
+                                  disabled={aprobando === o.id}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                >
+                                  <CheckCircle className="h-3.5 w-3.5" />
+                                  {aprobando === o.id ? '...' : 'Aprobar'}
+                                </button>
+                                <button
+                                  onClick={() => rechazar(o.id)}
+                                  disabled={rechazando === o.id}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-red-100 text-red-700 text-xs font-semibold rounded-lg hover:bg-red-200 disabled:opacity-50"
+                                >
+                                  <XCircle className="h-3.5 w-3.5" />
+                                  {rechazando === o.id ? '...' : 'Rechazar'}
+                                </button>
+                              </>
+                            ) : (
+                              <select
+                                value={o.status}
+                                disabled={cambiandoStatus === o.id}
+                                onChange={e => cambiarStatus(o.id, e.target.value)}
+                                className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 disabled:opacity-50"
+                              >
+                                {STATUS_ORDEN.map(s => (
+                                  <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+                                ))}
+                              </select>
+                            )}
                             <button
                               onClick={() => setExpandido(abierto ? null : o.id)}
                               className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"
@@ -305,35 +368,73 @@ export default function OrdenesCompraB2B() {
                       </tr>
                       {abierto && (
                         <tr>
-                          <td colSpan={7} className="px-5 pb-4 bg-gray-50">
-                            <div className="rounded-lg border border-gray-100 overflow-hidden">
-                              <table className="w-full text-xs">
-                                <thead className="bg-gray-100">
-                                  <tr className="text-gray-500 uppercase tracking-wider">
-                                    <th className="px-4 py-2 text-left">Medicamento</th>
-                                    <th className="px-4 py-2 text-right">Cant.</th>
-                                    <th className="px-4 py-2 text-right">Precio unit.</th>
-                                    <th className="px-4 py-2 text-right">Subtotal</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white">
-                                  {(o.detalle_ordenes_compra || []).map(item => (
-                                    <tr key={item.id}>
-                                      <td className="px-4 py-2 font-medium text-gray-800">
-                                        {item.nombre_medicamento}
-                                        {item.presentacion && <span className="text-gray-400 ml-1">({item.presentacion})</span>}
-                                      </td>
-                                      <td className="px-4 py-2 text-right text-gray-600">{item.cantidad}</td>
-                                      <td className="px-4 py-2 text-right text-gray-600">{formatCOP(item.precio_mayorista)}</td>
-                                      <td className="px-4 py-2 text-right font-semibold text-gray-800">{formatCOP(item.subtotal)}</td>
+                          <td colSpan={7} className="px-5 pb-5 bg-gray-50">
+                            <div className="flex gap-4">
+                              {/* Comprobante de pago */}
+                              <div className="flex-shrink-0 w-48">
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                                  <ImageIcon className="h-3.5 w-3.5" /> Comprobante
+                                </p>
+                                {o.comprobante_url ? (
+                                  <a href={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noopener noreferrer">
+                                    <img
+                                      src={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`}
+                                      alt="Comprobante de pago"
+                                      className="w-full rounded-lg border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                                      style={{ maxHeight: 200 }}
+                                    />
+                                  </a>
+                                ) : (
+                                  <div className="w-full h-28 rounded-lg border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 text-xs">
+                                    Sin comprobante
+                                  </div>
+                                )}
+                                {o.status === 'pago_pendiente' && (
+                                  <div className="mt-3 flex flex-col gap-2">
+                                    <button onClick={() => aprobar(o.id)} disabled={aprobando === o.id}
+                                      className="w-full flex items-center justify-center gap-1.5 py-2 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50">
+                                      <CheckCircle className="h-3.5 w-3.5" />
+                                      {aprobando === o.id ? 'Aprobando...' : 'Aprobar y despachar'}
+                                    </button>
+                                    <button onClick={() => rechazar(o.id)} disabled={rechazando === o.id}
+                                      className="w-full flex items-center justify-center gap-1.5 py-2 bg-red-100 text-red-700 text-xs font-semibold rounded-lg hover:bg-red-200 disabled:opacity-50">
+                                      <XCircle className="h-3.5 w-3.5" />
+                                      {rechazando === o.id ? 'Rechazando...' : 'Rechazar'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Detalle de productos */}
+                              <div className="flex-1 rounded-lg border border-gray-100 overflow-hidden">
+                                <table className="w-full text-xs">
+                                  <thead className="bg-gray-100">
+                                    <tr className="text-gray-500 uppercase tracking-wider">
+                                      <th className="px-4 py-2 text-left">Medicamento</th>
+                                      <th className="px-4 py-2 text-right">Cant.</th>
+                                      <th className="px-4 py-2 text-right">Precio unit.</th>
+                                      <th className="px-4 py-2 text-right">Subtotal</th>
                                     </tr>
-                                  ))}
-                                  <tr className="bg-gray-50">
-                                    <td colSpan={3} className="px-4 py-2 text-right font-semibold text-gray-700">Total orden:</td>
-                                    <td className="px-4 py-2 text-right font-bold text-green-700">{formatCOP(o.total)}</td>
-                                  </tr>
-                                </tbody>
-                              </table>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 bg-white">
+                                    {(o.detalle_ordenes_compra || []).map(item => (
+                                      <tr key={item.id}>
+                                        <td className="px-4 py-2 font-medium text-gray-800">
+                                          {item.nombre_medicamento}
+                                          {item.presentacion && <span className="text-gray-400 ml-1">({item.presentacion})</span>}
+                                        </td>
+                                        <td className="px-4 py-2 text-right text-gray-600">{item.cantidad}</td>
+                                        <td className="px-4 py-2 text-right text-gray-600">{formatCOP(item.precio_mayorista)}</td>
+                                        <td className="px-4 py-2 text-right font-semibold text-gray-800">{formatCOP(item.subtotal)}</td>
+                                      </tr>
+                                    ))}
+                                    <tr className="bg-gray-50">
+                                      <td colSpan={3} className="px-4 py-2 text-right font-semibold text-gray-700">Total orden:</td>
+                                      <td className="px-4 py-2 text-right font-bold text-green-700">{formatCOP(o.total)}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
                             </div>
                           </td>
                         </tr>

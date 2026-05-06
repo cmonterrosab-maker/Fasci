@@ -1432,20 +1432,13 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
       );
     }
 
-    // Descontar stock
-    try {
-      await b2bService.descontarStockOrden(orden.id);
-    } catch (errInv) {
-      console.warn('[Bot B2B] Error descontando stock:', errInv.message);
-    }
-
-    // Notificar admin sobre nueva orden B2B
+    // Notificar admin: comprobante recibido, pendiente revisión
     if (ADMIN_WHATSAPP) {
       const resumenItems = (sesion.carrito || []).slice(0, 3)
         .map(i => `  • ${i.nombre} × ${i.cantidad}`)
         .join('\n');
       const msgAdmin = [
-        `🏪 *Nueva Orden B2B*`,
+        `🏪 *Nueva Orden B2B — Revisión pendiente*`,
         ``,
         `📋 ${orden.numero_orden}`,
         `🏢 ${drogueria.nombre}`,
@@ -1453,56 +1446,24 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
         `💰 Total: $${Number(orden.total).toLocaleString('es-CO')}`,
         ``,
         resumenItems,
-        sesion.carrito.length > 3 ? `  _...y ${sesion.carrito.length - 3} producto(s) más_` : '',
+        (sesion.carrito || []).length > 3 ? `  _...y ${(sesion.carrito || []).length - 3} producto(s) más_` : '',
         ``,
-        `Comprobante adjunto. Verificar y despachar.`,
-      ].filter(l => l !== undefined).join('\n');
+        `⚠️ Comprobante recibido. Verificar pago y aprobar desde el panel admin.`,
+      ].filter(l => l !== undefined && l !== '').join('\n');
       sendWhatsAppMessage(ADMIN_WHATSAPP, msgAdmin)
         .catch(e => console.warn('[Bot B2B] No se pudo notificar al admin:', e.message));
     }
 
-    // Asignar mensajero
-    // ── Asignación NORMAL B2B (distribución justa, no urgente) ────────────
-    let mensajeroNombre = null;
-    let mensajeroTel    = null;
-    try {
-      const resAsig = await asignacionService.asignarNormalB2B({
-        ordenId:          orden.id,
-        ciudad:           drogueria.ciudad || null,
-        compradoraLat:    drogueria.lat    || null,
-        compradoraLng:    drogueria.lng    || null,
-        compradoraNombre: drogueria.nombre,
-        compradoraTel:    telefono,
-      });
-      if (resAsig.success && resAsig.mensajero) {
-        mensajeroNombre = resAsig.mensajero.nombre;
-        mensajeroTel    = resAsig.mensajero.telefono;
-      }
-    } catch (errM) {
-      console.warn('[Bot B2B] Error en asignación normal:', errM.message);
-    }
-
     resetearSesion(telefono);
 
-    let msgFinal = (
-      `🎉 *¡Orden de Compra Confirmada!*\n\n` +
-      `📋 Número: *${orden.numero_orden}*\n` +
-      `💰 Total: *$${Number(orden.total).toLocaleString('es-CO')}*\n\n`
-    );
-
-    if (mensajeroNombre) {
-      msgFinal += `📦 Domiciliario asignado: *${mensajeroNombre}*\n📞 ${mensajeroTel}\n\n`;
-    } else {
-      msgFinal += `Estamos asignando el transporte de tu pedido 🛵\n\n`;
-    }
-
-    msgFinal += (
-      `⏱️ Tiempo estimado: *2-4 horas* (pedido mayorista)\n\n` +
-      `📍 Escribe *${orden.numero_orden}* para ver el estado en cualquier momento.\n` +
+    return (
+      `✅ *¡Comprobante recibido!*\n\n` +
+      `📋 Orden: *${orden.numero_orden}*\n` +
+      `💰 Total: *$${Number(orden.total).toLocaleString('es-CO')}*\n\n` +
+      `⏳ Estamos *validando tu pago*. Te notificaremos en cuanto sea aprobado y asignemos el transporte.\n\n` +
+      `📍 Escribe *${orden.numero_orden}* en cualquier momento para consultar el estado.\n` +
       `¡Gracias por comprar con *Droguería Virtual*! 💊`
     );
-
-    return msgFinal;
   }
 
   // Fallback: mostrar menú B2B

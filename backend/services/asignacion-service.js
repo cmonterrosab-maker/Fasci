@@ -273,13 +273,14 @@ class AsignacionService {
     console.log(`[Asignacion] NORMAL B2B — orden ${ordenId}, ciudad: ${ciudad || 'cualquiera'}`);
 
     try {
-      // 1. Candidatos disponibles, preferir la misma ciudad
+      // 1. Candidatos disponibles con canal b2b o ambos, preferir la misma ciudad
       let query = this.supabase
         .from('mensajeros')
-        .select('id, nombre, telefono, vehiculo, zona, ciudad, ultimo_pedido_at')
+        .select('id, nombre, telefono, vehiculo, zona, ciudad, ultimo_pedido_at, canal')
         .eq('status', 'activo')
         .eq('disponible', true)
         .is('pedido_actual_id', null)
+        .in('canal', ['b2b', 'ambos'])
         .order('ultimo_pedido_at', { ascending: true, nullsFirst: true });
 
       const { data: todos, error } = await query;
