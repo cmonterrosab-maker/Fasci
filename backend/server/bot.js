@@ -1397,6 +1397,12 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
 
   // ── COMPROBANTE: crear orden, descontar stock, asignar mensajero ──────────
   if (sesion.estado === ESTADOS.B2B_COMPROBANTE || sesion.b2b?.comprobante_url) {
+    // Capturar URL del comprobante — igual que B2C captura datos.comprobante
+    // Usar contexto.mediaUrl directamente si está disponible (mensaje actual),
+    // de lo contrario usar lo guardado en la sesión (mensaje anterior).
+    const comprobanteUrl = contexto?.mediaUrl || sesion.b2b?.comprobante_url || null;
+    console.log(`[Bot B2B] Comprobante capturado: ${comprobanteUrl} | sesion: ${sesion.b2b?.comprobante_url} | contexto: ${contexto?.mediaUrl}`);
+
     await sendWhatsAppMessage(telefono, '✅ *¡Comprobante recibido!* Procesando tu orden... ⏳');
 
     let orden;
@@ -1411,7 +1417,7 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
         compradoraNit:         drogueria.nit,
         items:                 sesion.carrito,
         metodoPago:            'nequi_daviplata',
-        comprobanteUrl:        sesion.b2b.comprobante_url || contexto?.mediaUrl,
+        comprobanteUrl,
         notas:                 `Descuento: ${sesion.b2b.descuento?.porcentaje || 0}%`,
       });
 
