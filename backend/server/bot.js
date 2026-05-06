@@ -1416,8 +1416,24 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
       );
     }
 
-    // Foto recibida → capturar metadatos y confirmar entrega
-    const fotoMeta = await capturarMetaMedia(contexto.mediaUrl, contexto.messageSid, contexto.mediaType, mensajero.telefono);
+    // Foto recibida → capturar metadatos enriquecidos y confirmar entrega
+    const ahoraEntrega = new Date().toISOString();
+    const baseMeta = await capturarMetaMedia(contexto.mediaUrl, contexto.messageSid, contexto.mediaType, mensajero.telefono);
+    const fotoMeta = baseMeta ? {
+      ...baseMeta,
+      // Identidad del mensajero (audit trail completo)
+      mensajero_id:     mensajero.id,
+      mensajero_nombre: mensajero.nombre,
+      mensajero_ciudad: mensajero.ciudad || null,
+      // Última posición GPS conocida del mensajero en el momento de la entrega
+      mensajero_ultima_lat: mensajero.ultima_lat || null,
+      mensajero_ultima_lng: mensajero.ultima_lng || null,
+      mensajero_gps_at:     mensajero.ultima_ubicacion_at || null,
+      // Momento exacto de confirmación
+      confirmado_at: ahoraEntrega,
+      pedido_numero:  numeroPedido,
+    } : null;
+
     const resultado = await mensajeroService.confirmarEntrega(mensajero.telefono, numeroPedido, contexto.mediaUrl, fotoMeta);
     delete sesion.pendingDelivery;
     guardarSesion(telefonoSesion, sesion);
@@ -1426,16 +1442,28 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
       return `❌ No pude confirmar *${numeroPedido}*.\n${resultado.error || 'Verifica el número o contacta al administrador.'}`;
     }
 
+    // ── Notificar al cliente que su pedido llegó ──────────────────────────────
     const pedido = resultado.pedido;
     if (pedido?.cliente_telefono) {
-      await sendWhatsAppMessage(
-        pedido.cliente_telefono,
-        `✅ *¡Tu pedido llegó!*\n\nPedido *${numeroPedido}* entregado exitosamente.\n\n¡Gracias por comprar en Droguería Virtual! 💊`
-      ).catch(() => {});
+      const horaEntrega = new Date(ahoraEntrega).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+      const msgCliente = [
+        `✅ *¡Tu pedido llegó!*`,
+        ``,
+        `📦 *${numeroPedido}* fue entregado a las *${horaEntrega}* por *${mensajero.nombre}*.`,
+        ``,
+        `¿Todo llegó bien? Califica tu experiencia del 1 al 5 ⭐`,
+        `_(1 = muy malo · 5 = excelente)_`,
+      ].join('\n');
+
+      sendWhatsAppMessage(pedido.cliente_telefono, msgCliente)
+        .catch(err => console.error(`[Bot] No se pudo notificar al cliente (${pedido.cliente_telefono}):`, err.message));
+    } else {
+      console.warn(`[Bot] Sin teléfono de cliente para notificar entrega de ${numeroPedido}`);
     }
 
     return (
       `✅ *Entrega confirmada: ${numeroPedido}*\n\n` +
+      `El cliente fue notificado automáticamente.\n\n` +
       `¡Gracias ${mensajero.nombre}! Ya estás disponible para el próximo pedido 🛵`
     );
   }

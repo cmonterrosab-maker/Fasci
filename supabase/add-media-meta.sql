@@ -1,15 +1,34 @@
 -- Metadatos de verificación de comprobantes y fotos de entrega
--- comprobante_meta: prueba del pago enviado por el cliente
--- foto_entrega_meta: prueba de la entrega enviada por el mensajero
 --
--- Estructura del JSONB:
+-- comprobante_meta (enviado por el cliente al pagar):
 -- {
---   "sha256":             "abc123...",     -- hash del archivo (integridad)
---   "file_size_bytes":    143210,          -- tamaño en bytes
---   "content_type":       "image/jpeg",    -- tipo MIME
---   "twilio_message_sid": "MM...",         -- ID único del mensaje Twilio (auditable)
---   "received_at":        "2026-05-05T...",-- timestamp de recepción en el servidor
---   "sender_phone":       "3015077489"     -- teléfono del remitente
+--   "sha256":             "abc...",        -- hash SHA-256 del archivo
+--   "file_size_bytes":    143210,
+--   "content_type":       "image/jpeg",
+--   "twilio_message_sid": "MM...",         -- auditable en consola Twilio
+--   "received_at":        "2026-05-05T...",
+--   "sender_phone":       "3015077489"
+-- }
+--
+-- foto_entrega_meta (foto que envía el mensajero al entregar):
+-- {
+--   "sha256":                "abc...",
+--   "file_size_bytes":       87300,
+--   "content_type":          "image/jpeg",
+--   "twilio_message_sid":    "MM...",
+--   "received_at":           "2026-05-05T...",
+--   "sender_phone":          "3005292953",
+--   -- identidad del mensajero (audit trail completo)
+--   "mensajero_id":          "uuid",
+--   "mensajero_nombre":      "Pedro Pérez",
+--   "mensajero_ciudad":      "Cartagena",
+--   -- GPS del mensajero en el momento de la entrega
+--   "mensajero_ultima_lat":  10.3997,
+--   "mensajero_ultima_lng":  -75.5144,
+--   "mensajero_gps_at":      "2026-05-05T...",
+--   -- contexto de la entrega
+--   "confirmado_at":         "2026-05-05T...",
+--   "pedido_numero":         "DV-2026-0002"
 -- }
 
 ALTER TABLE pedidos
@@ -23,4 +42,9 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_comprobante_sid
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_foto_entrega_sid
   ON pedidos ((foto_entrega_meta->>'twilio_message_sid'))
+  WHERE foto_entrega_meta IS NOT NULL;
+
+-- Índice para búsquedas por mensajero en fotos de entrega
+CREATE INDEX IF NOT EXISTS idx_pedidos_foto_entrega_mensajero
+  ON pedidos ((foto_entrega_meta->>'mensajero_id'))
   WHERE foto_entrega_meta IS NOT NULL;

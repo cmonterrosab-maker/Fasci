@@ -49,6 +49,15 @@ interface MediaMeta {
   twilio_message_sid: string | null;
   received_at: string;
   sender_phone: string;
+  // Campos adicionales en foto_entrega_meta
+  mensajero_id?: string;
+  mensajero_nombre?: string;
+  mensajero_ciudad?: string;
+  mensajero_ultima_lat?: number | null;
+  mensajero_ultima_lng?: number | null;
+  mensajero_gps_at?: string | null;
+  confirmado_at?: string;
+  pedido_numero?: string;
 }
 
 interface PedidoAdmin {
@@ -195,6 +204,40 @@ function MetaPanel({ meta, label }: { meta: MediaMeta; label: string }) {
               <a href={twilioLogUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700">
                 <ExternalLink className="h-3 w-3" />
               </a>
+            )}
+          </div>
+        )}
+
+        {/* Campos extra: foto de entrega */}
+        {meta.mensajero_nombre && (
+          <div className="pt-2 mt-1 border-t border-emerald-200 space-y-1">
+            <div className="text-gray-500 font-medium mb-1">Mensajero</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+              <div><span className="text-gray-400">Nombre: </span><span className="text-gray-700">{meta.mensajero_nombre}</span></div>
+              {meta.mensajero_ciudad && <div><span className="text-gray-400">Ciudad: </span><span className="text-gray-700">{meta.mensajero_ciudad}</span></div>}
+              {meta.confirmado_at && (
+                <div className="col-span-2">
+                  <span className="text-gray-400">Confirmado: </span>
+                  <span className="text-gray-700">{new Date(meta.confirmado_at).toLocaleString('es-CO', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit' })}</span>
+                </div>
+              )}
+            </div>
+            {/* GPS del mensajero al momento de la entrega */}
+            {meta.mensajero_ultima_lat && meta.mensajero_ultima_lng ? (
+              <div className="flex items-center gap-2 mt-1">
+                <MapPin className="h-3 w-3 text-emerald-600" />
+                <span className="text-gray-400">GPS al entregar: </span>
+                <span className="text-gray-700">{meta.mensajero_ultima_lat.toFixed(5)}, {meta.mensajero_ultima_lng.toFixed(5)}</span>
+                <a
+                  href={`https://www.google.com/maps?q=${meta.mensajero_ultima_lat},${meta.mensajero_ultima_lng}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-blue-500 hover:text-blue-700"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            ) : (
+              <div className="text-gray-400 italic">Sin GPS registrado al momento de entrega</div>
             )}
           </div>
         )}
