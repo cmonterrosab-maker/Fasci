@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+
+function mediaUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (url.includes('twilio.com') || url.includes('api.twilio.com')) {
+    return `/api/media/proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
 import {
   Search,
   Store,
@@ -257,10 +265,10 @@ function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => 
                   <CreditCard className="h-3.5 w-3.5" />Comprobante de pago
                 </h3>
                 <img
-                  src={detalle.comprobanteUrl}
+                  src={mediaUrl(detalle.comprobanteUrl)!}
                   alt="Comprobante de pago"
                   className="w-full rounded-xl border border-gray-200 cursor-zoom-in object-cover max-h-64"
-                  onClick={() => setFotoAmpliada(detalle.comprobanteUrl)}
+                  onClick={() => setFotoAmpliada(mediaUrl(detalle.comprobanteUrl))}
                 />
               </div>
             )}
@@ -273,10 +281,10 @@ function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => 
                 </h3>
                 <div className="relative">
                   <img
-                    src={detalle.fotoEntregaUrl}
+                    src={mediaUrl(detalle.fotoEntregaUrl)!}
                     alt="Foto de entrega"
                     className="w-full rounded-xl border-2 border-green-300 cursor-zoom-in object-cover max-h-72"
-                    onClick={() => setFotoAmpliada(detalle.fotoEntregaUrl)}
+                    onClick={() => setFotoAmpliada(mediaUrl(detalle.fotoEntregaUrl))}
                   />
                   <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1">
                     <CheckCircle className="h-3 w-3" />Entregado

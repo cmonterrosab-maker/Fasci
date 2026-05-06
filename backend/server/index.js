@@ -203,6 +203,41 @@ app.post('/webhook/whatsapp', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * GET /api/media/proxy?url=<encoded_twilio_url>
+ * Proxy autenticado para imágenes de Twilio (comprobantes, fotos de entrega).
+ * El browser no puede cargar URLs de api.twilio.com directamente sin credenciales.
+ */
+app.get('/api/media/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('url requerida');
+
+  // Solo permitir URLs de Twilio o Supabase Storage
+  const permitidos = ['api.twilio.com', 'twilio.com', 'supabase.co', 'supabase.in'];
+  let urlHost;
+  try { urlHost = new URL(targetUrl).hostname; } catch { return res.status(400).send('url inválida'); }
+  if (!permitidos.some(h => urlHost.endsWith(h))) return res.status(403).send('dominio no permitido');
+
+  try {
+    const headers = {};
+    if (urlHost.endsWith('twilio.com')) {
+      const sid   = process.env.TWILIO_ACCOUNT_SID;
+      const token = process.env.TWILIO_AUTH_TOKEN;
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64');
+    }
+
+    const response = await fetch(targetUrl, { headers });
+    if (!response.ok) return res.status(response.status).send('No se pudo obtener la imagen');
+
+    const buffer = await response.arrayBuffer();
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    res.status(500).send('Error al obtener imagen');
+  }
+});
+
+/**
  * GET /api/admin/stats
  * Estadísticas globales del sistema.
  */
