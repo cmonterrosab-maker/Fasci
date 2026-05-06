@@ -347,9 +347,9 @@ function DashboardB2B() {
                 {/* Comprobante thumbnail */}
                 <div className="shrink-0">
                   {o.comprobante_url ? (
-                    <a href={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noreferrer">
+                    <a href={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noreferrer">
                       <img
-                        src={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`}
+                        src={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`}
                         alt="Comprobante"
                         className="w-20 h-20 object-cover rounded-lg border border-amber-200 hover:opacity-80 transition-opacity"
                       />

@@ -376,9 +376,9 @@ export default function OrdenesCompraB2B() {
                                   <ImageIcon className="h-3.5 w-3.5" /> Comprobante
                                 </p>
                                 {o.comprobante_url ? (
-                                  <a href={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noopener noreferrer">
+                                  <a href={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noopener noreferrer">
                                     <img
-                                      src={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`}
+                                      src={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`}
                                       alt="Comprobante de pago"
                                       className="w-full rounded-lg border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
                                       style={{ maxHeight: 200 }}
