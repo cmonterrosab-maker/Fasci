@@ -117,6 +117,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
       MediaUrl0: mediaUrl,
       MediaContentType0: mediaType,
       NumMedia,
+      MessageSid,
     } = req.body;
 
     if (!rawFrom) {
@@ -150,9 +151,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
           }
         : null,
       // Imagen adjunta (comprobante de pago, fórmula médica, etc.)
-      mediaUrl:  mediaUrl  || null,
-      mediaType: mediaType || null,
-      numMedia:  parseInt(NumMedia, 10) || 0,
+      mediaUrl:   mediaUrl   || null,
+      mediaType:  mediaType  || null,
+      numMedia:   parseInt(NumMedia, 10) || 0,
+      messageSid: MessageSid || null,
     };
 
     // ── Detección de confirmación de entrega del mensajero ──────────────────

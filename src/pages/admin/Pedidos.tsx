@@ -27,6 +27,9 @@ import {
   CreditCard,
   Phone,
   Hash,
+  ShieldCheck,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
 
@@ -37,6 +40,15 @@ interface Item {
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
+}
+
+interface MediaMeta {
+  sha256: string;
+  file_size_bytes: number;
+  content_type: string;
+  twilio_message_sid: string | null;
+  received_at: string;
+  sender_phone: string;
 }
 
 interface PedidoAdmin {
@@ -54,7 +66,9 @@ interface PedidoAdmin {
   createdAt: string;
   entregadoAt: string | null;
   fotoEntregaUrl: string | null;
+  fotoEntregaMeta: MediaMeta | null;
   comprobanteUrl: string | null;
+  comprobanteMeta: MediaMeta | null;
   mensajeroNombre: string | null;
   mensajeroTelefono: string | null;
 }
@@ -64,9 +78,9 @@ interface PedidoDetalle extends PedidoAdmin {
 }
 
 const MOCK_PEDIDOS: PedidoAdmin[] = [
-  { id: '1', numero: '#1045', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Carlos M.', clienteTelefono: '', clienteDireccion: '', total: 45000, costoEnvio: 4000, estado: 'pendiente', itemsCount: 3, createdAt: new Date().toISOString(), entregadoAt: null, fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: null, mensajeroTelefono: null },
-  { id: '2', numero: '#1044', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Maria G.', clienteTelefono: '', clienteDireccion: '', total: 28500, costoEnvio: 4000, estado: 'en_camino', itemsCount: 2, createdAt: new Date(Date.now() - 1800000).toISOString(), entregadoAt: null, fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: 'Juan', mensajeroTelefono: null },
-  { id: '3', numero: '#1043', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Juan P.', clienteTelefono: '', clienteDireccion: '', total: 67000, costoEnvio: 4000, estado: 'entregado', itemsCount: 4, createdAt: new Date(Date.now() - 3600000).toISOString(), entregadoAt: new Date(Date.now() - 1800000).toISOString(), fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: 'Pedro', mensajeroTelefono: null },
+  { id: '1', numero: '#1045', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Carlos M.', clienteTelefono: '', clienteDireccion: '', total: 45000, costoEnvio: 4000, estado: 'pendiente', itemsCount: 3, createdAt: new Date().toISOString(), entregadoAt: null, fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: null, mensajeroTelefono: null },
+  { id: '2', numero: '#1044', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Maria G.', clienteTelefono: '', clienteDireccion: '', total: 28500, costoEnvio: 4000, estado: 'en_camino', itemsCount: 2, createdAt: new Date(Date.now() - 1800000).toISOString(), entregadoAt: null, fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: 'Juan', mensajeroTelefono: null },
+  { id: '3', numero: '#1043', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Juan P.', clienteTelefono: '', clienteDireccion: '', total: 67000, costoEnvio: 4000, estado: 'entregado', itemsCount: 4, createdAt: new Date(Date.now() - 3600000).toISOString(), entregadoAt: new Date(Date.now() - 1800000).toISOString(), fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: 'Pedro', mensajeroTelefono: null },
 ];
 
 const ESTADO_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -116,11 +130,77 @@ function mapPedido(p: any): PedidoAdmin {
     itemsCount:       p.itemsCount ?? (p.detalle_pedidos?.length ?? 0),
     createdAt:        p.created_at ?? p.createdAt ?? new Date().toISOString(),
     entregadoAt:      p.entregado_at ?? null,
-    fotoEntregaUrl:   p.foto_entrega_url ?? null,
-    comprobanteUrl:   p.comprobante_url ?? null,
-    mensajeroNombre:  p.mensajeros?.nombre ?? null,
+    fotoEntregaUrl:   p.foto_entrega_url    ?? null,
+    fotoEntregaMeta:  p.foto_entrega_meta   ?? null,
+    comprobanteUrl:   p.comprobante_url     ?? null,
+    comprobanteMeta:  p.comprobante_meta    ?? null,
+    mensajeroNombre:  p.mensajeros?.nombre  ?? null,
     mensajeroTelefono: p.mensajeros?.telefono ?? null,
   };
+}
+
+// ─── Metadata verification panel ─────────────────────────────────────────────
+
+function MetaPanel({ meta, label }: { meta: MediaMeta; label: string }) {
+  const [copied, setCopied] = React.useState(false);
+
+  const copyHash = () => {
+    navigator.clipboard.writeText(meta.sha256).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const fmtBytes = (b: number) => b < 1024 * 1024
+    ? `${(b / 1024).toFixed(1)} KB`
+    : `${(b / (1024 * 1024)).toFixed(2)} MB`;
+
+  const twilioLogUrl = meta.twilio_message_sid
+    ? `https://console.twilio.com/us1/monitor/logs/sms/${meta.twilio_message_sid}`
+    : null;
+
+  return (
+    <div className="rounded-xl border border-emerald-200 bg-emerald-50 overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-100 border-b border-emerald-200">
+        <ShieldCheck className="h-4 w-4 text-emerald-700" />
+        <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wider">{label} — Verificación</span>
+      </div>
+      <div className="px-4 py-3 space-y-2 text-xs">
+        {/* Hash */}
+        <div>
+          <div className="text-gray-500 mb-0.5">SHA-256 (integridad)</div>
+          <div className="flex items-center gap-2">
+            <code className="text-[10px] font-mono text-gray-700 bg-white rounded px-2 py-1 border border-gray-200 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+              {meta.sha256}
+            </code>
+            <button onClick={copyHash} className="shrink-0 text-gray-400 hover:text-emerald-700">
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+            {copied && <span className="text-emerald-600 text-xs">¡Copiado!</span>}
+          </div>
+        </div>
+        {/* Grid of quick facts */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div><span className="text-gray-400">Tipo: </span><span className="text-gray-700">{meta.content_type}</span></div>
+          <div><span className="text-gray-400">Tamaño: </span><span className="text-gray-700">{fmtBytes(meta.file_size_bytes)}</span></div>
+          <div><span className="text-gray-400">Recibido: </span><span className="text-gray-700">{new Date(meta.received_at).toLocaleString('es-CO', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</span></div>
+          <div><span className="text-gray-400">Teléfono: </span><span className="text-gray-700">{meta.sender_phone}</span></div>
+        </div>
+        {/* Twilio SID */}
+        {meta.twilio_message_sid && (
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400">MessageSid: </span>
+            <code className="text-[10px] font-mono text-gray-700">{meta.twilio_message_sid}</code>
+            {twilioLogUrl && (
+              <a href={twilioLogUrl} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-700">
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Detail Drawer ────────────────────────────────────────────────────────────
@@ -260,8 +340,8 @@ function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => 
 
             {/* Comprobante de pago */}
             {detalle.comprobanteUrl && (
-              <div>
-                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <div className="space-y-3">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <CreditCard className="h-3.5 w-3.5" />Comprobante de pago
                 </h3>
                 <img
@@ -270,13 +350,16 @@ function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => 
                   className="w-full rounded-xl border border-gray-200 cursor-zoom-in object-cover max-h-64"
                   onClick={() => setFotoAmpliada(mediaUrl(detalle.comprobanteUrl))}
                 />
+                {detalle.comprobanteMeta && (
+                  <MetaPanel meta={detalle.comprobanteMeta} label="Comprobante" />
+                )}
               </div>
             )}
 
             {/* Foto de entrega */}
             {detalle.fotoEntregaUrl ? (
-              <div>
-                <h3 className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <div className="space-y-3">
+                <h3 className="text-xs font-semibold text-green-600 uppercase tracking-wider flex items-center gap-1.5">
                   <Camera className="h-3.5 w-3.5" />Foto de entrega
                 </h3>
                 <div className="relative">
@@ -290,6 +373,9 @@ function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => 
                     <CheckCircle className="h-3 w-3" />Entregado
                   </div>
                 </div>
+                {detalle.fotoEntregaMeta && (
+                  <MetaPanel meta={detalle.fotoEntregaMeta} label="Foto entrega" />
+                )}
               </div>
             ) : detalle.estado === 'entregado' ? (
               <div className="rounded-xl border-2 border-dashed border-gray-200 p-6 text-center text-gray-400 text-sm">

@@ -18,7 +18,8 @@
  *   PASO 11 → Confirmación final con número de pedido
  */
 
-const path = require('path');
+const path   = require('path');
+const crypto = require('crypto');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const { createClient } = require('@supabase/supabase-js');
@@ -188,6 +189,37 @@ function generarNumeroPedido(id) {
   const anio = new Date().getFullYear();
   const numero = String(id).padStart(4, '0');
   return `DV-${anio}-${numero}`;
+}
+
+/**
+ * Descarga una imagen desde Twilio (con auth) o URL pública y retorna metadatos
+ * de verificación: hash SHA-256, tamaño, content-type, MessageSid, timestamp.
+ */
+async function capturarMetaMedia(url, messageSid, contentType, telefono) {
+  if (!url) return null;
+  try {
+    const headers = {};
+    if (url.includes('twilio.com')) {
+      const sid   = process.env.TWILIO_ACCOUNT_SID;
+      const token = process.env.TWILIO_AUTH_TOKEN;
+      headers['Authorization'] = 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64');
+    }
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+    const buf    = Buffer.from(await res.arrayBuffer());
+    const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+    return {
+      sha256,
+      file_size_bytes:    buf.length,
+      content_type:       contentType || res.headers.get('content-type') || 'image/jpeg',
+      twilio_message_sid: messageSid  || null,
+      received_at:        new Date().toISOString(),
+      sender_phone:       telefono,
+    };
+  } catch (err) {
+    console.warn('[Bot] capturarMetaMedia error:', err.message);
+    return null;
+  }
 }
 
 // ─── Seguimiento de pedidos ───────────────────────────────────────────────────
@@ -813,6 +845,15 @@ async function manejarComprobante(telefono, sesion, contexto) {
   }
 
   sesion.datos.comprobante = mediaUrl;
+  // Capturar metadatos en segundo plano (no bloquea la respuesta al cliente)
+  capturarMetaMedia(mediaUrl, contexto?.messageSid, contexto?.mediaType, telefono)
+    .then(meta => {
+      if (meta) {
+        const s = sesiones.get(telefono);
+        if (s) { s.datos.comprobanteMeta = meta; s.timestamp = Date.now(); }
+      }
+    })
+    .catch(() => {});
   guardarSesion(telefono, sesion);
 
   // Notificar que estamos procesando
@@ -893,7 +934,8 @@ async function procesarPedidoFinal(telefono, sesion) {
         costo_domicilio:   COSTO_DOMICILIO,
         metodo_pago:       'nequi_daviplata',
         notas:             `Cédula: ${datos.cedula || 'N/A'} | Lat: ${datos.ubicacion?.lat || 'N/A'} | Lng: ${datos.ubicacion?.lng || 'N/A'}`,
-        comprobante_url:   datos.comprobante || null,
+        comprobante_url:   datos.comprobante     || null,
+        comprobante_meta:  datos.comprobanteMeta || null,
         tiene_formula:     false,
         tc_aceptado:       true,
         canal:             'whatsapp',
@@ -1374,8 +1416,9 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
       );
     }
 
-    // Foto recibida → confirmar entrega
-    const resultado = await mensajeroService.confirmarEntrega(mensajero.telefono, numeroPedido, contexto.mediaUrl);
+    // Foto recibida → capturar metadatos y confirmar entrega
+    const fotoMeta = await capturarMetaMedia(contexto.mediaUrl, contexto.messageSid, contexto.mediaType, mensajero.telefono);
+    const resultado = await mensajeroService.confirmarEntrega(mensajero.telefono, numeroPedido, contexto.mediaUrl, fotoMeta);
     delete sesion.pendingDelivery;
     guardarSesion(telefonoSesion, sesion);
 
