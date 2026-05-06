@@ -257,6 +257,20 @@ function esSeguimiento(msg) {
 }
 
 /**
+ * Busca mensajero por id y retorna datos de GPS (query separada para evitar
+ * fallos de FK en PostgREST cuando mensajero_id es null o FK no está cacheada).
+ */
+async function getMensajeroParaSeguimiento(mensajeroId) {
+  if (!mensajeroId) return null;
+  const { data } = await supabase
+    .from('mensajeros')
+    .select('nombre, telefono, ultima_lat, ultima_lng, ultima_ubicacion_at')
+    .eq('id', mensajeroId)
+    .maybeSingle();
+  return data || null;
+}
+
+/**
  * Maneja consultas de seguimiento para B2C y B2B.
  * Busca por número de pedido/orden específico, o por teléfono del cliente.
  */
@@ -266,44 +280,47 @@ async function manejarSeguimiento(telefono, mensaje) {
 
   // ── Número de orden B2B específico: DV-OC-XXXX ───────────────────────────
   if (/^DV-OC-\d{4}-\d+$/.test(upper)) {
-    const { data: orden } = await supabase
+    const { data: orden, error: errOrden } = await supabase
       .from('ordenes_compra')
-      .select(`numero_orden, status, total, created_at, enviada_at, entregada_at,
-               mensajeros ( nombre, telefono, ultima_lat, ultima_lng, ultima_ubicacion_at )`)
+      .select('numero_orden, status, total, created_at, enviada_at, entregada_at, mensajero_id')
       .eq('numero_orden', upper)
       .maybeSingle();
 
+    if (errOrden) console.error('[Bot] seguimiento B2B error:', errOrden.message);
     if (!orden) return `❌ No encontré la orden *${upper}*. Verifica el número.`;
-    return formatearEstado(orden.numero_orden, orden.status, orden.mensajeros, true);
+    const mensajero = await getMensajeroParaSeguimiento(orden.mensajero_id);
+    return formatearEstado(orden.numero_orden, orden.status, mensajero, true);
   }
 
   // ── Número de pedido B2C específico: DV-XXXX ──────────────────────────────
   if (/^DV-\d{4}-\d+$/.test(upper)) {
-    const { data: pedido } = await supabase
+    const { data: pedido, error: errPedido } = await supabase
       .from('pedidos')
-      .select(`numero_pedido, status, total, created_at, entregado_at,
-               mensajeros ( nombre, telefono, ultima_lat, ultima_lng, ultima_ubicacion_at )`)
+      .select('numero_pedido, status, total, created_at, entregado_at, mensajero_id')
       .eq('numero_pedido', upper)
       .maybeSingle();
 
+    if (errPedido) console.error('[Bot] seguimiento B2C error:', errPedido.message);
     if (!pedido) return `❌ No encontré el pedido *${upper}*. Verifica el número.`;
-    return formatearEstado(pedido.numero_pedido, pedido.status, pedido.mensajeros, false);
+    const mensajero = await getMensajeroParaSeguimiento(pedido.mensajero_id);
+    return formatearEstado(pedido.numero_pedido, pedido.status, mensajero, false);
   }
 
-  // ── Buscar por teléfono: últimos pedidos B2C ──────────────────────────────
+  // ── Buscar por teléfono: últimos pedidos B2C + B2B ────────────────────────
+  // Intentar también con +57 prefijo por si el número fue guardado con código de país
+  const telefonoAlt = telefono.startsWith('57') ? telefono.slice(2) : `57${telefono}`;
+
   const [{ data: pedidos }, { data: ordenes }] = await Promise.all([
     supabase
       .from('pedidos')
-      .select(`numero_pedido, status, total, created_at,
-               mensajeros ( nombre, telefono, ultima_lat, ultima_lng, ultima_ubicacion_at )`)
-      .eq('cliente_telefono', telefono)
+      .select('numero_pedido, status, total, created_at, mensajero_id')
+      .or(`cliente_telefono.eq.${telefono},cliente_telefono.eq.${telefonoAlt}`)
       .order('created_at', { ascending: false })
       .limit(3),
     supabase
       .from('ordenes_compra')
-      .select(`numero_orden, status, total, created_at,
-               mensajeros ( nombre, telefono, ultima_lat, ultima_lng, ultima_ubicacion_at )`)
-      .eq('compradora_telefono', telefono)
+      .select('numero_orden, status, total, created_at, mensajero_id')
+      .or(`compradora_telefono.eq.${telefono},compradora_telefono.eq.${telefonoAlt}`)
       .order('created_at', { ascending: false })
       .limit(3),
   ]);
@@ -311,7 +328,7 @@ async function manejarSeguimiento(telefono, mensaje) {
   const todosPedidos = [
     ...(pedidos  || []).map(p => ({ ...p, tipo: 'b2c', numero: p.numero_pedido })),
     ...(ordenes  || []).map(o => ({ ...o, tipo: 'b2b', numero: o.numero_orden  })),
-  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   if (!todosPedidos.length) {
     return (
@@ -328,7 +345,8 @@ async function manejarSeguimiento(telefono, mensaje) {
 
   if (activos.length === 1) {
     const p = activos[0];
-    return formatearEstado(p.numero, p.status, p.mensajeros, p.tipo === 'b2b');
+    const mensajero = await getMensajeroParaSeguimiento(p.mensajero_id);
+    return formatearEstado(p.numero, p.status, mensajero, p.tipo === 'b2b');
   }
 
   // Más de uno → listar todos
@@ -1324,36 +1342,47 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
  * @param {string} mensaje    — texto limpio recibido
  * @returns {Promise<string>}
  */
-async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}) {
+async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono = null) {
   const txt = (mensaje || '').trim().toUpperCase();
+  const telefonoSesion = telefono || mensajero.telefono;
+  const sesion = obtenerSesion(telefonoSesion);
 
   // ── GPS compartido: actualizar ubicación en tiempo real ───────────────────
-  // Cuando el mensajero comparte su ubicación en vivo, Twilio envía Latitude/Longitude.
-  // Lo guardamos en DB para que los clientes puedan rastrear al domiciliario.
   if (contexto?.location?.latitude && contexto?.location?.longitude) {
     await mensajeroService.actualizarUbicacion(
       mensajero.id,
       contexto.location.latitude,
       contexto.location.longitude
     );
-    // Si tiene pedido activo, confirmar silenciosamente (no bloquear flujo)
     if (mensajero.pedido_actual_id) {
-      return `📍 *Ubicación actualizada*\nTu posición fue registrada. Los clientes pueden verla en tiempo real.\n\nPara confirmar la entrega cuando llegues:\n*ENTREGADO ${mensajero.pedido_actual_id}*`;
+      // Look up numero_pedido for display
+      const { data: pa } = await supabase.from('pedidos').select('numero_pedido').eq('id', mensajero.pedido_actual_id).maybeSingle();
+      const numPedido = pa?.numero_pedido || mensajero.pedido_actual_id;
+      return `📍 *Ubicación actualizada*\nTu posición fue registrada. Los clientes pueden verla en tiempo real.\n\nPara confirmar la entrega cuando llegues:\n*ENTREGADO ${numPedido}*`;
     }
     return `📍 Ubicación registrada correctamente ✅`;
   }
 
-  // ── ENTREGADO DV-XXXX ──────────────────────────────────────────────────────
-  const matchEntrega = txt.match(/^ENTREGADO\s+(DV-[\d-]+)/);
-  if (matchEntrega) {
-    const numeroPedido = matchEntrega[1];
-    const resultado = await mensajeroService.confirmarEntrega(mensajero.telefono, numeroPedido);
+  // ── Entrega pendiente: esperando foto comprobante ─────────────────────────
+  if (sesion.pendingDelivery) {
+    const numeroPedido = sesion.pendingDelivery;
+
+    if (!contexto.mediaUrl) {
+      return (
+        `📸 Aún espero la *foto de entrega* para el pedido *${numeroPedido}*.\n\n` +
+        `Por favor toma una foto del producto entregado al cliente y envíala aquí.`
+      );
+    }
+
+    // Foto recibida → confirmar entrega
+    const resultado = await mensajeroService.confirmarEntrega(mensajero.telefono, numeroPedido, contexto.mediaUrl);
+    delete sesion.pendingDelivery;
+    guardarSesion(telefonoSesion, sesion);
 
     if (!resultado.success) {
       return `❌ No pude confirmar *${numeroPedido}*.\n${resultado.error || 'Verifica el número o contacta al administrador.'}`;
     }
 
-    // Notificar al cliente que su pedido llegó
     const pedido = resultado.pedido;
     if (pedido?.cliente_telefono) {
       await sendWhatsAppMessage(
@@ -1365,6 +1394,30 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}) {
     return (
       `✅ *Entrega confirmada: ${numeroPedido}*\n\n` +
       `¡Gracias ${mensajero.nombre}! Ya estás disponible para el próximo pedido 🛵`
+    );
+  }
+
+  // ── ENTREGADO DV-XXXX (o solo ENTREGADO con pedido activo) ────────────────
+  const matchEntrega = txt.match(/^ENTREGADO\s+(DV-[\d-]+)/);
+  let numeroPedidoEntrega = matchEntrega ? matchEntrega[1] : null;
+
+  // Sin número de pedido → buscar el pedido activo del mensajero
+  if (!numeroPedidoEntrega && txt === 'ENTREGADO' && mensajero.pedido_actual_id) {
+    const { data: pa } = await supabase
+      .from('pedidos')
+      .select('numero_pedido')
+      .eq('id', mensajero.pedido_actual_id)
+      .maybeSingle();
+    numeroPedidoEntrega = pa?.numero_pedido || null;
+  }
+
+  if (numeroPedidoEntrega) {
+    sesion.pendingDelivery = numeroPedidoEntrega;
+    guardarSesion(telefonoSesion, sesion);
+    return (
+      `📸 *Confirmación de entrega: ${numeroPedidoEntrega}*\n\n` +
+      `Para completar la entrega, por favor toma una *foto del producto entregado* al cliente y envíala aquí.\n\n` +
+      `La foto quedará como comprobante en el sistema. ✅`
     );
   }
 
@@ -1430,7 +1483,7 @@ async function manejarMensaje(telefono, mensaje, contexto = {}) {
   try {
     const mensajero = await mensajeroService.getByPhone(telefono);
     if (mensajero) {
-      return await manejarFlujoMensajero(mensajero, mensajeLimpio, contexto);
+      return await manejarFlujoMensajero(mensajero, mensajeLimpio, contexto, telefono);
     }
   } catch (errMens) {
     // Si falla el lookup, continuar como cliente normal (no bloquear)

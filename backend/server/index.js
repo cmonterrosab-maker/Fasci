@@ -373,6 +373,27 @@ app.get('/api/admin/pedidos', async (req, res) => {
   }
 });
 
+/** GET /api/admin/pedidos/:id — Detalle completo de un pedido */
+app.get('/api/admin/pedidos/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('pedidos')
+      .select(`
+        *,
+        droguerias(nombre, ciudad, telefono, direccion),
+        mensajeros!mensajero_id(nombre, telefono),
+        detalle_pedidos(nombre_medicamento, cantidad, precio_unitario, subtotal)
+      `)
+      .eq('id', req.params.id)
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Pedido no encontrado.' });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** PATCH /api/admin/pedidos/:id/mensajero — Reasignar mensajero */
 app.patch('/api/admin/pedidos/:id/mensajero', async (req, res) => {
   try {

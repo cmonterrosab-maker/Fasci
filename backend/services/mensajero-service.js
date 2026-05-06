@@ -385,7 +385,7 @@ class MensajeroService {
    * @param {string} numeroPedido    - Ej: "DV-2026-0001"
    * @returns {Promise<{success: boolean, pedido?: object, error?: string}>}
    */
-  async confirmarEntrega(numeroWhatsapp, numeroPedido) {
+  async confirmarEntrega(numeroWhatsapp, numeroPedido, fotoUrl = null) {
     try {
       console.log(`[MensajeroService] Confirmando entrega. Mensajero: ${numeroWhatsapp}, Pedido: ${numeroPedido}`);
 
@@ -430,13 +430,16 @@ class MensajeroService {
       }
 
       // Actualizar pedido a 'entregado'
+      const updateData = {
+        status: 'entregado',
+        entregado_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      if (fotoUrl) updateData.foto_entrega_url = fotoUrl;
+
       const { data: pedidoActualizado, error: errUpdate } = await this.supabase
         .from('pedidos')
-        .update({
-          status: 'entregado',
-          entregado_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', pedido.id)
         .select()
         .single();

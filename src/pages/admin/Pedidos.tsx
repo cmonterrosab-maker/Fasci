@@ -13,13 +13,23 @@ import {
   Loader2,
   Calendar,
   X,
-  Filter,
   ChevronLeft,
   ChevronRight,
+  Camera,
+  CreditCard,
+  Phone,
+  Hash,
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
 
-type EstadoPedido = 'pendiente' | 'confirmado' | 'en_preparacion' | 'en_camino' | 'entregado' | 'cancelado';
+type EstadoPedido = 'pendiente' | 'pendiente_pago' | 'confirmado' | 'en_preparacion' | 'en_camino' | 'entregado' | 'cancelado';
+
+interface Item {
+  nombre_medicamento: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+}
 
 interface PedidoAdmin {
   id: string;
@@ -27,28 +37,38 @@ interface PedidoAdmin {
   drogueria: string;
   ciudad: string;
   cliente: string;
+  clienteTelefono: string;
+  clienteDireccion: string;
   total: number;
+  costoEnvio: number;
   estado: EstadoPedido;
   itemsCount: number;
   createdAt: string;
+  entregadoAt: string | null;
+  fotoEntregaUrl: string | null;
+  comprobanteUrl: string | null;
+  mensajeroNombre: string | null;
+  mensajeroTelefono: string | null;
+}
+
+interface PedidoDetalle extends PedidoAdmin {
+  items: Item[];
 }
 
 const MOCK_PEDIDOS: PedidoAdmin[] = [
-  { id: '1', numero: '#1045', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Carlos M.', total: 45000, estado: 'pendiente', itemsCount: 3, createdAt: new Date().toISOString() },
-  { id: '2', numero: '#1044', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Maria G.', total: 28500, estado: 'en_camino', itemsCount: 2, createdAt: new Date(Date.now() - 1800000).toISOString() },
-  { id: '3', numero: '#1043', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Juan P.', total: 67000, estado: 'entregado', itemsCount: 4, createdAt: new Date(Date.now() - 3600000).toISOString() },
-  { id: '4', numero: '#1042', drogueria: 'Farmacia Central', ciudad: 'Barranquilla', cliente: 'Ana R.', total: 19000, estado: 'confirmado', itemsCount: 1, createdAt: new Date(Date.now() - 5400000).toISOString() },
-  { id: '5', numero: '#1041', drogueria: 'Pharmacity Unicentro', ciudad: 'Bogota', cliente: 'Pedro S.', total: 52000, estado: 'cancelado', itemsCount: 2, createdAt: new Date(Date.now() - 86400000).toISOString() },
-  { id: '6', numero: '#1040', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Laura T.', total: 35000, estado: 'en_preparacion', itemsCount: 3, createdAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: '1', numero: '#1045', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Carlos M.', clienteTelefono: '', clienteDireccion: '', total: 45000, costoEnvio: 4000, estado: 'pendiente', itemsCount: 3, createdAt: new Date().toISOString(), entregadoAt: null, fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: null, mensajeroTelefono: null },
+  { id: '2', numero: '#1044', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Maria G.', clienteTelefono: '', clienteDireccion: '', total: 28500, costoEnvio: 4000, estado: 'en_camino', itemsCount: 2, createdAt: new Date(Date.now() - 1800000).toISOString(), entregadoAt: null, fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: 'Juan', mensajeroTelefono: null },
+  { id: '3', numero: '#1043', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Juan P.', clienteTelefono: '', clienteDireccion: '', total: 67000, costoEnvio: 4000, estado: 'entregado', itemsCount: 4, createdAt: new Date(Date.now() - 3600000).toISOString(), entregadoAt: new Date(Date.now() - 1800000).toISOString(), fotoEntregaUrl: null, comprobanteUrl: null, mensajeroNombre: 'Pedro', mensajeroTelefono: null },
 ];
 
-const ESTADO_CONFIG: Record<EstadoPedido, { label: string; color: string; icon: React.ReactNode }> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800', icon: <Clock className="h-3.5 w-3.5" /> },
-  confirmado: { label: 'Confirmado', color: 'bg-blue-100 text-blue-800', icon: <CheckCircle className="h-3.5 w-3.5" /> },
+const ESTADO_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  pendiente:      { label: 'Pendiente',      color: 'bg-yellow-100 text-yellow-800', icon: <Clock className="h-3.5 w-3.5" /> },
+  pendiente_pago: { label: 'Pend. Pago',     color: 'bg-orange-100 text-orange-700', icon: <CreditCard className="h-3.5 w-3.5" /> },
+  confirmado:     { label: 'Confirmado',     color: 'bg-blue-100 text-blue-800',     icon: <CheckCircle className="h-3.5 w-3.5" /> },
   en_preparacion: { label: 'En preparacion', color: 'bg-purple-100 text-purple-800', icon: <Package className="h-3.5 w-3.5" /> },
-  en_camino: { label: 'En camino', color: 'bg-orange-100 text-orange-800', icon: <Truck className="h-3.5 w-3.5" /> },
-  entregado: { label: 'Entregado', color: 'bg-green-100 text-green-800', icon: <CheckCircle className="h-3.5 w-3.5" /> },
-  cancelado: { label: 'Cancelado', color: 'bg-red-100 text-red-800', icon: <XCircle className="h-3.5 w-3.5" /> },
+  en_camino:      { label: 'En camino',      color: 'bg-orange-100 text-orange-800', icon: <Truck className="h-3.5 w-3.5" /> },
+  entregado:      { label: 'Entregado',      color: 'bg-green-100 text-green-800',   icon: <CheckCircle className="h-3.5 w-3.5" /> },
+  cancelado:      { label: 'Cancelado',      color: 'bg-red-100 text-red-800',       icon: <XCircle className="h-3.5 w-3.5" /> },
 };
 
 const PAGE_SIZE = 20;
@@ -66,6 +86,232 @@ function timeAgo(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('es-CO');
 }
 
+function fmtDateTime(dateStr: string) {
+  return new Date(dateStr).toLocaleString('es-CO', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function mapPedido(p: any): PedidoAdmin {
+  return {
+    id:               p.id,
+    numero:           p.numero_pedido ?? p.numero ?? `#${p.id?.slice(0, 6)}`,
+    drogueria:        p.droguerias?.nombre ?? p.drogueria ?? 'Bot WhatsApp',
+    ciudad:           p.droguerias?.ciudad ?? p.ciudad ?? '—',
+    cliente:          p.cliente_nombre ?? p.cliente ?? 'Cliente',
+    clienteTelefono:  p.cliente_telefono ?? '',
+    clienteDireccion: p.cliente_direccion ?? '',
+    total:            p.total ?? 0,
+    costoEnvio:       p.costo_domicilio ?? 4000,
+    estado:           p.status ?? p.estado ?? 'pendiente',
+    itemsCount:       p.itemsCount ?? (p.detalle_pedidos?.length ?? 0),
+    createdAt:        p.created_at ?? p.createdAt ?? new Date().toISOString(),
+    entregadoAt:      p.entregado_at ?? null,
+    fotoEntregaUrl:   p.foto_entrega_url ?? null,
+    comprobanteUrl:   p.comprobante_url ?? null,
+    mensajeroNombre:  p.mensajeros?.nombre ?? null,
+    mensajeroTelefono: p.mensajeros?.telefono ?? null,
+  };
+}
+
+// ─── Detail Drawer ────────────────────────────────────────────────────────────
+
+function DetailDrawer({ pedidoId, onClose }: { pedidoId: string; onClose: () => void }) {
+  const [detalle, setDetalle] = useState<PedidoDetalle | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
+
+  useEffect(() => {
+    axios.get(`/api/admin/pedidos/${pedidoId}`)
+      .then(res => {
+        const p = res.data;
+        setDetalle({
+          ...mapPedido(p),
+          items: p.detalle_pedidos ?? [],
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [pedidoId]);
+
+  const conf = detalle ? (ESTADO_CONFIG[detalle.estado] ?? { label: detalle.estado, color: 'bg-gray-100 text-gray-800', icon: null }) : null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 h-full w-full max-w-lg bg-white z-50 shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">{detalle?.numero ?? '...'}</h2>
+            {conf && (
+              <span className={`badge ${conf.color} flex items-center gap-1 w-fit mt-1`}>
+                {conf.icon}{conf.label}
+              </span>
+            )}
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+          </div>
+        ) : !detalle ? (
+          <div className="flex-1 flex items-center justify-center text-gray-400">No se pudo cargar el pedido</div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+            {/* Tiempos */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 rounded-xl p-3">
+                <div className="text-xs text-gray-400 mb-0.5">Creado</div>
+                <div className="text-sm font-medium text-gray-700">{fmtDateTime(detalle.createdAt)}</div>
+              </div>
+              {detalle.entregadoAt && (
+                <div className="bg-green-50 rounded-xl p-3">
+                  <div className="text-xs text-green-600 mb-0.5">Entregado</div>
+                  <div className="text-sm font-medium text-green-700">{fmtDateTime(detalle.entregadoAt)}</div>
+                </div>
+              )}
+            </div>
+
+            {/* Droguería y mensajero */}
+            <div className="space-y-2">
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50">
+                <Store className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-gray-900">{detalle.drogueria}</div>
+                  <div className="text-xs text-gray-400 flex items-center gap-1"><MapPin className="h-3 w-3" />{detalle.ciudad}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50">
+                <User className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="text-sm font-medium text-gray-900">{detalle.cliente}</div>
+                  {detalle.clienteTelefono && (
+                    <div className="text-xs text-gray-400 flex items-center gap-1"><Phone className="h-3 w-3" />{detalle.clienteTelefono}</div>
+                  )}
+                  {detalle.clienteDireccion && (
+                    <div className="text-xs text-gray-400 flex items-center gap-1"><MapPin className="h-3 w-3" />{detalle.clienteDireccion}</div>
+                  )}
+                </div>
+              </div>
+              {detalle.mensajeroNombre && (
+                <div className="flex items-start gap-3 p-3 rounded-xl bg-gray-50">
+                  <Truck className="h-4 w-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{detalle.mensajeroNombre}</div>
+                    {detalle.mensajeroTelefono && (
+                      <div className="text-xs text-gray-400 flex items-center gap-1"><Phone className="h-3 w-3" />{detalle.mensajeroTelefono}</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Items */}
+            {detalle.items.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Productos</h3>
+                <div className="divide-y divide-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+                  {detalle.items.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-white">
+                      <div>
+                        <div className="text-sm text-gray-800">{item.nombre_medicamento}</div>
+                        <div className="text-xs text-gray-400">x{item.cantidad} × {formatCurrency(item.precio_unitario)}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-700">{formatCurrency(item.subtotal)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Total */}
+            <div className="border border-gray-100 rounded-xl overflow-hidden">
+              <div className="flex justify-between px-4 py-2.5 bg-gray-50">
+                <span className="text-sm text-gray-500">Subtotal productos</span>
+                <span className="text-sm text-gray-700">{formatCurrency(detalle.total - detalle.costoEnvio)}</span>
+              </div>
+              <div className="flex justify-between px-4 py-2.5 bg-gray-50 border-t border-gray-100">
+                <span className="text-sm text-gray-500">Envío</span>
+                <span className="text-sm text-gray-700">{formatCurrency(detalle.costoEnvio)}</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 bg-white border-t border-gray-200">
+                <span className="text-sm font-bold text-gray-900">Total</span>
+                <span className="text-sm font-bold text-green-700">{formatCurrency(detalle.total)}</span>
+              </div>
+            </div>
+
+            {/* Comprobante de pago */}
+            {detalle.comprobanteUrl && (
+              <div>
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <CreditCard className="h-3.5 w-3.5" />Comprobante de pago
+                </h3>
+                <img
+                  src={detalle.comprobanteUrl}
+                  alt="Comprobante de pago"
+                  className="w-full rounded-xl border border-gray-200 cursor-zoom-in object-cover max-h-64"
+                  onClick={() => setFotoAmpliada(detalle.comprobanteUrl)}
+                />
+              </div>
+            )}
+
+            {/* Foto de entrega */}
+            {detalle.fotoEntregaUrl ? (
+              <div>
+                <h3 className="text-xs font-semibold text-green-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Camera className="h-3.5 w-3.5" />Foto de entrega
+                </h3>
+                <div className="relative">
+                  <img
+                    src={detalle.fotoEntregaUrl}
+                    alt="Foto de entrega"
+                    className="w-full rounded-xl border-2 border-green-300 cursor-zoom-in object-cover max-h-72"
+                    onClick={() => setFotoAmpliada(detalle.fotoEntregaUrl)}
+                  />
+                  <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3" />Entregado
+                  </div>
+                </div>
+              </div>
+            ) : detalle.estado === 'entregado' ? (
+              <div className="rounded-xl border-2 border-dashed border-gray-200 p-6 text-center text-gray-400 text-sm">
+                <Camera className="h-6 w-6 mx-auto mb-2 opacity-40" />
+                Sin foto de entrega registrada
+              </div>
+            ) : null}
+
+          </div>
+        )}
+      </div>
+
+      {/* Lightbox */}
+      {fotoAmpliada && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setFotoAmpliada(null)}
+        >
+          <img src={fotoAmpliada} alt="Vista ampliada" className="max-w-full max-h-full rounded-xl shadow-2xl" />
+          <button className="absolute top-4 right-4 text-white bg-black/50 rounded-full p-2">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function AdminPedidos() {
   const [pedidos, setPedidos] = useState<PedidoAdmin[]>(MOCK_PEDIDOS);
   const [busqueda, setBusqueda] = useState('');
@@ -73,29 +319,19 @@ export default function AdminPedidos() {
   const [fechaFiltro, setFechaFiltro] = useState('');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetch = async () => {
+    const fetchPedidos = async () => {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/pedidos');
         const raw: any[] = Array.isArray(res.data) ? res.data : (res.data?.pedidos ?? res.data?.data ?? []);
-        const data: PedidoAdmin[] = raw.map(p => ({
-          id:         p.id,
-          numero:     p.numero_pedido ?? p.numero ?? `#${p.id?.slice(0,6)}`,
-          drogueria:  p.droguerias?.nombre ?? p.drogueria ?? 'Bot WhatsApp',
-          ciudad:     p.droguerias?.ciudad ?? p.ciudad ?? '—',
-          cliente:    p.cliente_nombre ?? p.cliente ?? 'Cliente',
-          total:      p.total ?? 0,
-          estado:     p.status ?? p.estado ?? 'pendiente',
-          itemsCount: p.itemsCount ?? 0,
-          createdAt:  p.created_at ?? p.createdAt ?? new Date().toISOString(),
-        }));
-        setPedidos(data);
+        setPedidos(raw.map(mapPedido));
       } catch {}
       finally { setLoading(false); }
     };
-    fetch();
+    fetchPedidos();
   }, []);
 
   const filtrados = pedidos.filter(p => {
@@ -110,7 +346,6 @@ export default function AdminPedidos() {
   const totalPages = Math.ceil(filtrados.length / PAGE_SIZE);
   const paginados = filtrados.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Resumen
   const resumen = Object.keys(ESTADO_CONFIG).reduce((acc, key) => {
     acc[key] = pedidos.filter(p => p.estado === key).length;
     return acc;
@@ -127,14 +362,14 @@ export default function AdminPedidos() {
         </div>
 
         {/* Resumen rapido */}
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-3 sm:grid-cols-7 gap-3 mb-6">
           {Object.entries(ESTADO_CONFIG).map(([key, conf]) => (
             <button
               key={key}
               onClick={() => { setFiltroEstado(filtroEstado === key ? 'todos' : key); setPage(1); }}
               className={`rounded-xl p-3 text-center transition-all border-2 ${
                 filtroEstado === key ? 'border-green-600 shadow-md' : 'border-transparent'
-              } ${conf.color.replace('text-', 'text-').split(' ')[0]}`}
+              } ${conf.color.split(' ')[0]}`}
             >
               <div className="text-xl font-bold">{resumen[key] || 0}</div>
               <div className="text-xs mt-0.5 opacity-80">{conf.label}</div>
@@ -192,9 +427,13 @@ export default function AdminPedidos() {
                   <tr><td colSpan={7} className="text-center py-12 text-gray-400">No se encontraron pedidos</td></tr>
                 ) : (
                   paginados.map(p => {
-                    const conf = ESTADO_CONFIG[p.estado];
+                    const conf = ESTADO_CONFIG[p.estado] ?? { label: p.estado, color: 'bg-gray-100 text-gray-800', icon: null };
                     return (
-                      <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+                      <tr
+                        key={p.id}
+                        className="hover:bg-green-50 transition-colors cursor-pointer"
+                        onClick={() => setSelectedId(p.id)}
+                      >
                         <td className="px-6 py-4 font-mono font-bold text-gray-900 text-sm">{p.numero}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
@@ -202,8 +441,7 @@ export default function AdminPedidos() {
                             <div>
                               <div className="text-sm font-medium text-gray-900">{p.drogueria}</div>
                               <div className="flex items-center gap-1 text-xs text-gray-400">
-                                <MapPin className="h-3 w-3" />
-                                {p.ciudad}
+                                <MapPin className="h-3 w-3" />{p.ciudad}
                               </div>
                             </div>
                           </div>
@@ -217,10 +455,14 @@ export default function AdminPedidos() {
                         <td className="px-6 py-4 text-sm text-gray-500">{p.itemsCount} items</td>
                         <td className="px-6 py-4 text-sm font-semibold text-gray-900">{formatCurrency(p.total)}</td>
                         <td className="px-6 py-4">
-                          <span className={`badge ${conf.color} flex items-center gap-1 w-fit`}>
-                            {conf.icon}
-                            {conf.label}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`badge ${conf.color} flex items-center gap-1 w-fit`}>
+                              {conf.icon}{conf.label}
+                            </span>
+                            {p.fotoEntregaUrl && (
+                              <span title="Foto de entrega disponible"><Camera className="h-4 w-4 text-green-500" /></span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-400">{timeAgo(p.createdAt)}</td>
                       </tr>
@@ -242,6 +484,10 @@ export default function AdminPedidos() {
           )}
         </div>
       </main>
+
+      {selectedId && (
+        <DetailDrawer pedidoId={selectedId} onClose={() => setSelectedId(null)} />
+      )}
     </div>
   );
 }

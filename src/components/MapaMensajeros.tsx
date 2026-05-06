@@ -1,7 +1,16 @@
 import { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+
+// Actualiza el centro del mapa cuando cambian las coordenadas (MapContainer.center es initial-only)
+function ChangeView({ center }: { center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, map.getZoom(), { animate: true });
+  }, [center[0], center[1]]);
+  return null;
+}
 
 // Centro de Cartagena por defecto
 const CENTRO_CARTAGENA: [number, number] = [10.3997, -75.5144];
@@ -82,6 +91,7 @@ export default function MapaMensajeros({ mensajeros }: { mensajeros: Mensajero[]
           zoom={13}
           style={{ height: '100%', width: '100%' }}
         >
+          <ChangeView center={centro} />
           <TileLayer
             attribution='&copy; OpenStreetMap contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
