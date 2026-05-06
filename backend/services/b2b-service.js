@@ -66,25 +66,30 @@ class B2BService {
       const limpio = normalizarTelefono(telefono);
       console.log(`[B2BService] getDrogueriaByPhone: buscando ${limpio}`);
 
-      const { data, error } = await this.supabase
-        .from('droguerias')
-        .select('*')
-        .in('status', ['active', 'approved'])
-        .or(`whatsapp_numero.eq.${limpio},telefono.eq.${limpio}`)
-        .maybeSingle();
+      // Buscar por whatsapp_numero primero, luego por telefono.
+      // Se usan dos queries separadas para evitar ambigüedad con .or() + .eq().
+      for (const campo of ['whatsapp_numero', 'telefono']) {
+        const { data, error } = await this.supabase
+          .from('droguerias')
+          .select('*')
+          .eq('status', 'activo')
+          .in('tipo', ['socio'])
+          .eq(campo, limpio)
+          .maybeSingle();
 
-      if (error) {
-        console.error('[B2BService] getDrogueriaByPhone error:', error.message);
-        return null;
+        if (error) {
+          console.error(`[B2BService] getDrogueriaByPhone error en ${campo}:`, error.message);
+          continue;
+        }
+
+        if (data) {
+          console.log(`[B2BService] Droguería B2B encontrada por ${campo}: ${data.nombre}`);
+          return data;
+        }
       }
 
-      if (data) {
-        console.log(`[B2BService] Droguería B2B encontrada: ${data.nombre} (${data.status})`);
-      } else {
-        console.log(`[B2BService] No se encontró droguería B2B para ${limpio}`);
-      }
-
-      return data || null;
+      console.log(`[B2BService] No se encontró droguería B2B para ${limpio}`);
+      return null;
     } catch (err) {
       console.error('[B2BService] getDrogueriaByPhone excepción:', err.message);
       return null;
@@ -583,6 +588,245 @@ class B2BService {
       console.error('[B2BService] descontarStockOrden error:', err.message);
       return { success: false, advertencias, error: err.message };
     }
+  }
+
+  // ─── 9. getUltimoPedidoConfirmado ────────────────────────────────────────
+
+  async getUltimoPedidoConfirmado(drogueriaId) {
+    try {
+      const { data, error } = await this.supabase
+        .from('ordenes_compra')
+        .select(`
+          id, numero_orden, status, total, descuento, subtotal, created_at,
+          detalle_ordenes_compra (
+            catalogo_id, medicamento_id, nombre_medicamento,
+            presentacion, laboratorio, cantidad, precio_mayorista
+          )
+        `)
+        .eq('drogueria_compradora_id', drogueriaId)
+        .in('status', ['confirmada', 'pagada', 'en_preparacion', 'enviada', 'entregada'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data || null;
+    } catch (err) {
+      console.error('[B2BService] getUltimoPedidoConfirmado error:', err.message);
+      return null;
+    }
+  }
+
+  // ─── 10. construirOfertaRepetir ───────────────────────────────────────────
+
+  construirOfertaRepetir(orden, drogueria) {
+    const fecha = new Date(orden.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+    const items = (orden.detalle_ordenes_compra || []);
+    const resumen = items.slice(0, 3).map(i =>
+      `  • ${i.nombre_medicamento}${i.presentacion ? ` (${i.presentacion})` : ''} × ${i.cantidad}`
+    ).join('\n');
+    const mas = items.length > 3 ? `\n  _...y ${items.length - 3} producto(s) más_` : '';
+
+    return [
+      `👋 Hola *${drogueria.nombre}*, bienvenida de nuevo!`,
+      '',
+      `📦 Tu último pedido fue el *${fecha}* — ${formatCOP(orden.total)}:`,
+      resumen + mas,
+      '',
+      '¿Deseas *REPETIR* ese pedido o prefieres hacer uno nuevo?',
+      '',
+      '↩️  Escribe *REPETIR* para cargarlo al carrito',
+      '🆕  Escribe *NUEVO* para cotizar desde cero',
+    ].join('\n');
+  }
+
+  // ─── 11. calcularPerfilCompra ─────────────────────────────────────────────
+
+  async calcularPerfilCompra(drogueriaId) {
+    try {
+      // Traer todas las órdenes confirmadas con sus items
+      const { data: ordenes, error } = await this.supabase
+        .from('ordenes_compra')
+        .select(`
+          id, created_at,
+          detalle_ordenes_compra (
+            nombre_medicamento, catalogo_id, medicamento_id, cantidad
+          )
+        `)
+        .eq('drogueria_compradora_id', drogueriaId)
+        .in('status', ['confirmada','pagada','en_preparacion','enviada','entregada'])
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      if (!ordenes || ordenes.length === 0) return { productos: [], frecuencia_dias: null };
+
+      // Calcular frecuencia global (días entre órdenes consecutivas)
+      let frecuenciaGlobalDias = null;
+      if (ordenes.length >= 2) {
+        const diffs = [];
+        for (let i = 1; i < ordenes.length; i++) {
+          const dias = (new Date(ordenes[i].created_at) - new Date(ordenes[i - 1].created_at)) / 86400000;
+          if (dias > 0) diffs.push(dias);
+        }
+        if (diffs.length > 0) {
+          frecuenciaGlobalDias = Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length);
+        }
+      }
+
+      // Agrupar por medicamento
+      const mapaProductos = {};
+      for (const orden of ordenes) {
+        for (const item of (orden.detalle_ordenes_compra || [])) {
+          const key = item.nombre_medicamento;
+          if (!mapaProductos[key]) {
+            mapaProductos[key] = {
+              nombre_medicamento: key,
+              catalogo_id: item.catalogo_id || null,
+              medicamento_id: item.medicamento_id || null,
+              cantidades: [],
+              fechas: [],
+            };
+          }
+          mapaProductos[key].cantidades.push(Number(item.cantidad));
+          mapaProductos[key].fechas.push(orden.created_at);
+        }
+      }
+
+      // Calcular estadísticas por producto
+      const now = new Date();
+      const productos = Object.values(mapaProductos).map(p => {
+        const cantidadPromedio = Math.round(p.cantidades.reduce((a, b) => a + b, 0) / p.cantidades.length);
+        const ultimoPedidoAt = p.fechas[p.fechas.length - 1];
+
+        // Frecuencia por producto (si tiene >=2 apariciones)
+        let frecuenciaDias = frecuenciaGlobalDias;
+        if (p.fechas.length >= 2) {
+          const diffs = [];
+          for (let i = 1; i < p.fechas.length; i++) {
+            const d = (new Date(p.fechas[i]) - new Date(p.fechas[i - 1])) / 86400000;
+            if (d > 0) diffs.push(d);
+          }
+          if (diffs.length > 0) {
+            frecuenciaDias = Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length);
+          }
+        }
+
+        const proximoPedidoEstimado = frecuenciaDias
+          ? new Date(new Date(ultimoPedidoAt).getTime() + frecuenciaDias * 86400000).toISOString()
+          : null;
+
+        return {
+          nombre_medicamento: p.nombre_medicamento,
+          catalogo_id: p.catalogo_id,
+          medicamento_id: p.medicamento_id,
+          veces_ordenado: p.cantidades.length,
+          cantidad_promedio: cantidadPromedio,
+          frecuencia_dias: frecuenciaDias,
+          ultimo_pedido_at: ultimoPedidoAt,
+          proximo_pedido_estimado: proximoPedidoEstimado,
+        };
+      }).sort((a, b) => b.veces_ordenado - a.veces_ordenado);
+
+      // Upsert en la tabla perfiles_compra_b2b
+      for (const p of productos) {
+        await this.supabase
+          .from('perfiles_compra_b2b')
+          .upsert({
+            drogueria_id: drogueriaId,
+            ...p,
+            updated_at: now.toISOString(),
+          }, { onConflict: 'drogueria_id,nombre_medicamento' });
+      }
+
+      console.log(`[B2BService] Perfil calculado para ${drogueriaId}: ${productos.length} productos, frecuencia global ${frecuenciaGlobalDias} dias`);
+      return { productos, frecuencia_dias: frecuenciaGlobalDias };
+    } catch (err) {
+      console.error('[B2BService] calcularPerfilCompra error:', err.message);
+      return { productos: [], frecuencia_dias: null };
+    }
+  }
+
+  // ─── 12. getPerfilCompra ──────────────────────────────────────────────────
+
+  async getPerfilCompra(drogueriaId, limite = 8) {
+    try {
+      const { data, error } = await this.supabase
+        .from('perfiles_compra_b2b')
+        .select('*')
+        .eq('drogueria_id', drogueriaId)
+        .order('veces_ordenado', { ascending: false })
+        .limit(limite);
+
+      if (error) throw error;
+      return data || [];
+    } catch (err) {
+      console.error('[B2BService] getPerfilCompra error:', err.message);
+      return [];
+    }
+  }
+
+  // ─── 13. getDrogueriasDueForReorder ──────────────────────────────────────
+
+  async getDrogueriasDueForReorder() {
+    try {
+      const enDos = new Date(Date.now() + 2 * 86400000).toISOString(); // hoy + 2 dias
+
+      // Productos cuyo proximo_pedido_estimado esta entre ayer y hoy+2 dias
+      // y cuya alerta no fue enviada en los ultimos 6 dias
+      const { data, error } = await this.supabase
+        .from('perfiles_compra_b2b')
+        .select(`
+          drogueria_id, nombre_medicamento, cantidad_promedio,
+          frecuencia_dias, proximo_pedido_estimado, alerta_enviada_at,
+          droguerias!drogueria_id (
+            id, nombre, whatsapp_numero, telefono, status
+          )
+        `)
+        .lte('proximo_pedido_estimado', enDos)
+        .gte('proximo_pedido_estimado', new Date(Date.now() - 86400000).toISOString()) // desde ayer
+        .or('alerta_enviada_at.is.null,alerta_enviada_at.lt.' + new Date(Date.now() - 6 * 86400000).toISOString());
+
+      if (error) throw error;
+
+      // Agrupar por drogueria
+      const mapa = {};
+      for (const row of (data || [])) {
+        const drog = row.droguerias;
+        if (!drog || drog.status !== 'activo') continue;
+        if (!mapa[row.drogueria_id]) {
+          mapa[row.drogueria_id] = { drogueria: drog, productos: [] };
+        }
+        mapa[row.drogueria_id].productos.push(row);
+      }
+
+      return Object.values(mapa);
+    } catch (err) {
+      console.error('[B2BService] getDrogueriasDueForReorder error:', err.message);
+      return [];
+    }
+  }
+
+  // ─── 14. construirAlertaReabastecimiento ─────────────────────────────────
+
+  construirAlertaReabastecimiento(drogueria, productos) {
+    const nombre = drogueria.nombre || 'Drogueria';
+    const lineas = productos.slice(0, 4).map(p => {
+      const dias = p.frecuencia_dias ? `cada ${p.frecuencia_dias} dias` : '';
+      return `  - *${p.nombre_medicamento}* x ${Math.round(p.cantidad_promedio)} und ${dias ? `(${dias})` : ''}`;
+    }).join('\n');
+
+    return [
+      `*Hola ${nombre}!*`,
+      '',
+      `Segun tu historial de compras, es momento de reabastecer:`,
+      '',
+      lineas,
+      '',
+      `Hacemos el pedido ahora?`,
+      `Responde *SI* para cargar tu pedido habitual o *NO* para ignorar.`,
+      '',
+      `_Drogueria Virtual -- Tu aliado mayorista_`,
+    ].join('\n');
   }
 }
 

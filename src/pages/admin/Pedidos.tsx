@@ -86,11 +86,7 @@ interface PedidoDetalle extends PedidoAdmin {
   items: Item[];
 }
 
-const MOCK_PEDIDOS: PedidoAdmin[] = [
-  { id: '1', numero: '#1045', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Carlos M.', clienteTelefono: '', clienteDireccion: '', total: 45000, costoEnvio: 4000, estado: 'pendiente', itemsCount: 3, createdAt: new Date().toISOString(), entregadoAt: null, fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: null, mensajeroTelefono: null },
-  { id: '2', numero: '#1044', drogueria: 'Farmacia El Alivio', ciudad: 'Medellin', cliente: 'Maria G.', clienteTelefono: '', clienteDireccion: '', total: 28500, costoEnvio: 4000, estado: 'en_camino', itemsCount: 2, createdAt: new Date(Date.now() - 1800000).toISOString(), entregadoAt: null, fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: 'Juan', mensajeroTelefono: null },
-  { id: '3', numero: '#1043', drogueria: 'Drogueria La Salud', ciudad: 'Bogota', cliente: 'Juan P.', clienteTelefono: '', clienteDireccion: '', total: 67000, costoEnvio: 4000, estado: 'entregado', itemsCount: 4, createdAt: new Date(Date.now() - 3600000).toISOString(), entregadoAt: new Date(Date.now() - 1800000).toISOString(), fotoEntregaUrl: null, fotoEntregaMeta: null, comprobanteUrl: null, comprobanteMeta: null, mensajeroNombre: 'Pedro', mensajeroTelefono: null },
-];
+const MOCK_PEDIDOS: PedidoAdmin[] = [];
 
 const ESTADO_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   pendiente:      { label: 'Pendiente',      color: 'bg-yellow-100 text-yellow-800', icon: <Clock className="h-3.5 w-3.5" /> },
@@ -489,7 +485,7 @@ export default function AdminPedidos() {
   }, {} as Record<string, number>);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f4f6f9]">
       <AdminNavbar />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">

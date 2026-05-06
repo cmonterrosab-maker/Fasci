@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import {
   MapPin, Phone, Bike, Star, Activity, RefreshCw, Circle,
-  AlertCircle, Package, Clock, User, UserPlus, X
+  AlertCircle, Package, User, UserPlus, X, Loader2,
 } from 'lucide-react';
 import MapaMensajeros from '../../components/MapaMensajeros';
 import { API_BASE_URL } from '../../lib/api';
+import AdminNavbar from '../../components/AdminNavbar';
+import { useCanal } from '../../contexts/CanalContext';
 
 const API = API_BASE_URL;
 
@@ -27,6 +29,7 @@ type Mensajero = {
   zona: string | null;
   vehiculo: string;
   placa: string | null;
+  canal: CanalMensajero;
   status: string;
   disponible: boolean;
   pedidos_completados: number;
@@ -39,30 +42,50 @@ type Mensajero = {
   pedido_activo: PedidoActivo | null;
 };
 
-type Resumen = {
-  total: number;
-  activos: number;
-  disponibles: number;
-  ocupados: number;
-  con_gps_vivo: number;
-};
+type Resumen = { total: number; activos: number; disponibles: number; ocupados: number; con_gps_vivo: number };
+type CanalMensajero = 'b2c' | 'b2b' | 'ambos';
 
-const FORM_VACIO = { nombre: '', telefono: '', vehiculo: 'moto', ciudad: 'Cartagena', zona: '', placa: '' };
+const FORM_VACIO: { nombre: string; telefono: string; vehiculo: string; canal: CanalMensajero; ciudad: string; zona: string; placa: string } =
+  { nombre: '', telefono: '', vehiculo: 'moto', canal: 'b2c', ciudad: 'Cartagena', zona: '', placa: '' };
+
+function dotColor(m: Mensajero) {
+  if (!m.disponible && m.pedido_activo) return 'bg-blue-500';
+  if (m.disponible && m.min_sin_gps !== null && m.min_sin_gps < 45) return 'bg-emerald-500';
+  if (m.disponible) return 'bg-yellow-400';
+  return 'bg-gray-300';
+}
+
+function statusText(m: Mensajero) {
+  if (!m.disponible && m.pedido_activo) return 'En entrega';
+  if (m.disponible && m.min_sin_gps !== null && m.min_sin_gps < 45) return 'Disponible';
+  if (m.disponible) return 'Disponible';
+  return 'Pausado';
+}
 
 export default function MensajerosLive() {
-  const [mensajeros, setMensajeros] = useState<Mensajero[]>([]);
-  const [resumen, setResumen]       = useState<Resumen | null>(null);
-  const [loading, setLoading]       = useState(true);
-  const [seleccionado, setSeleccionado] = useState<Mensajero | null>(null);
-  const [showModal, setShowModal]   = useState(false);
-  const [form, setForm]             = useState(FORM_VACIO);
-  const [saving, setSaving]         = useState(false);
-  const [saveError, setSaveError]   = useState('');
+  const { canal } = useCanal();
+  const [todos, setTodos]         = useState<Mensajero[]>([]);
+  const [resumen, setResumen]     = useState<Resumen | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [seleccionado, setSel]    = useState<Mensajero | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm]           = useState<typeof FORM_VACIO>({ ...FORM_VACIO, canal: canal as CanalMensajero });
+  const [saving, setSaving]       = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  // Filtrar por canal activo: mostrar propios + "ambos"
+  const mensajeros = todos.filter(m => m.canal === canal || m.canal === 'ambos');
+  const otroCanal  = todos.filter(m => m.canal === (canal === 'b2c' ? 'b2b' : 'b2c'));
+
+  const isB2B    = canal === 'b2b';
+  const accent   = isB2B ? 'text-indigo-600' : 'text-emerald-600';
+  const accentBg = isB2B ? 'bg-indigo-50'    : 'bg-emerald-50';
+  const btnColor = isB2B ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-emerald-600 hover:bg-emerald-700';
 
   const cargar = async () => {
     try {
       const { data } = await axios.get(`${API}/api/admin/mensajeros/live`);
-      setMensajeros(data.mensajeros || []);
+      setTodos(data.mensajeros || []);
       setResumen(data.resumen);
     } catch (err) {
       console.error('Error cargando mensajeros:', err);
@@ -73,9 +96,12 @@ export default function MensajerosLive() {
 
   useEffect(() => {
     cargar();
-    const id = setInterval(cargar, 15000); // refresh cada 15s
+    const id = setInterval(cargar, 15000);
     return () => clearInterval(id);
   }, []);
+
+  // Sincronizar canal default del form al cambiar de vista
+  useEffect(() => { setForm(f => ({ ...f, canal: canal as CanalMensajero })); }, [canal]);
 
   const registrar = async () => {
     if (!form.nombre.trim() || !form.telefono.trim()) return;
@@ -85,248 +111,181 @@ export default function MensajerosLive() {
         nombre:   form.nombre.trim(),
         telefono: form.telefono.trim().replace(/\D/g, '').slice(-10),
         vehiculo: form.vehiculo,
+        canal:    form.canal,
         ciudad:   form.ciudad.trim(),
         zona:     form.zona.trim() || null,
         placa:    form.placa.trim() || null,
       });
       setShowModal(false);
-      setForm(FORM_VACIO);
+      setForm({ ...FORM_VACIO, canal: canal as CanalMensajero });
       cargar();
     } catch (err: any) {
       setSaveError(err?.response?.data?.error || 'Error al registrar');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const toggleDisponible = async (id: string, disponible: boolean) => {
     try {
       await axios.put(`${API}/api/admin/mensajeros/${id}/disponible`, { disponible: !disponible });
       cargar();
-    } catch (err) {
-      console.error('Error actualizando:', err);
-    }
-  };
-
-  const getStatusColor = (m: Mensajero) => {
-    if (!m.disponible && m.pedido_activo)            return 'bg-blue-500';   // ocupado
-    if (m.disponible && m.min_sin_gps !== null && m.min_sin_gps < 45) return 'bg-green-500'; // disponible con GPS
-    if (m.disponible)                                return 'bg-yellow-500'; // disponible sin GPS reciente
-    return 'bg-gray-400';                                                    // inactivo
-  };
-
-  const getStatusText = (m: Mensajero) => {
-    if (!m.disponible && m.pedido_activo) return 'En entrega';
-    if (m.disponible && m.min_sin_gps !== null && m.min_sin_gps < 45) return 'Disponible';
-    if (m.disponible) return 'Disponible (GPS desactualizado)';
-    return 'Pausado';
+    } catch {}
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-[#f4f6f9]">
+      <AdminNavbar />
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-              <Bike className="w-8 h-8 text-emerald-600" />
-              Mensajeros en vivo
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+              Mensajeros — <span className={accent}>{isB2B ? 'B2B Mayorista' : 'B2C Droguería Virtual'}</span>
             </h1>
-            <p className="text-gray-500 mt-1 flex items-center gap-2">
+            <p className="text-sm text-gray-400 mt-1 flex items-center gap-2">
               <Circle className="w-2 h-2 fill-red-500 text-red-500 animate-pulse" />
-              Actualización automática cada 15 segundos
+              Actualización automática cada 15 s
+              {otroCanal.length > 0 && (
+                <span className="text-gray-300">·</span>
+              )}
+              {otroCanal.length > 0 && (
+                <span className="text-gray-400">
+                  {otroCanal.length} mensajero{otroCanal.length > 1 ? 's' : ''} en el otro canal no se muestran aquí
+                </span>
+              )}
             </p>
           </div>
-          <div className="flex gap-3">
-          <button
-            onClick={() => { setShowModal(true); setSaveError(''); }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <UserPlus className="w-4 h-4" /> Registrar mensajero
-          </button>
-          <button
-            onClick={cargar}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Actualizar
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => { setShowModal(true); setSaveError(''); }}
+              className={`flex items-center gap-2 px-4 py-2 ${btnColor} text-white rounded-xl text-sm font-semibold transition-all`}>
+              <UserPlus className="w-4 h-4" /> Registrar
+            </button>
+            <button onClick={cargar}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 transition-all">
+              <RefreshCw className="w-4 h-4" /> Actualizar
+            </button>
           </div>
-        </div>{/* /Header */}
+        </div>
 
-        {/* Modal Registrar Mensajero */}
-        {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-bold text-gray-900">Registrar mensajero</h2>
-                <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-400" /></button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Nombre completo *</label>
-                  <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.nombre}
-                    onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Juan García" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-700">Teléfono WhatsApp * (10 dígitos)</label>
-                  <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.telefono}
-                    onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="3005292953" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Vehículo</label>
-                    <select className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.vehiculo}
-                      onChange={e => setForm(f => ({ ...f, vehiculo: e.target.value }))}>
-                      <option value="moto">Moto</option>
-                      <option value="bicicleta">Bicicleta</option>
-                      <option value="carro">Carro</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Ciudad</label>
-                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.ciudad}
-                      onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Zona (opcional)</label>
-                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.zona}
-                      onChange={e => setForm(f => ({ ...f, zona: e.target.value }))} placeholder="Norte, Sur..." />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">Placa (opcional)</label>
-                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.placa}
-                      onChange={e => setForm(f => ({ ...f, placa: e.target.value }))} placeholder="ABC123" />
-                  </div>
-                </div>
-                {saveError && <p className="text-sm text-red-600">{saveError}</p>}
-              </div>
-              <div className="flex gap-3 mt-5">
-                <button onClick={() => setShowModal(false)}
-                  className="flex-1 border border-gray-300 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-50">
-                  Cancelar
-                </button>
-                <button onClick={registrar} disabled={saving || !form.nombre || !form.telefono}
-                  className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
-                  {saving ? 'Guardando...' : 'Registrar'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Resumen cards */}
+        {/* Métricas del canal actual */}
         {resumen && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-            <Card label="Total"         valor={resumen.total}        icon={User}        color="gray" />
-            <Card label="Activos"       valor={resumen.activos}      icon={Activity}    color="emerald" />
-            <Card label="Disponibles"   valor={resumen.disponibles}  icon={Bike}        color="green" />
-            <Card label="En entrega"    valor={resumen.ocupados}     icon={Package}     color="blue" />
-            <Card label="GPS en vivo"   valor={resumen.con_gps_vivo} icon={MapPin}      color="emerald" />
+            {[
+              { label: 'En este canal', valor: mensajeros.length,                                                icon: User,     bg: 'bg-gray-50',     text: 'text-gray-600' },
+              { label: 'Activos',       valor: mensajeros.filter(m => m.status === 'activo').length,             icon: Activity, bg: accentBg,          text: accent },
+              { label: 'Disponibles',   valor: mensajeros.filter(m => m.disponible).length,                     icon: Bike,     bg: accentBg,          text: accent },
+              { label: 'En entrega',    valor: mensajeros.filter(m => m.pedido_activo).length,                   icon: Package,  bg: 'bg-blue-50',      text: 'text-blue-600' },
+              { label: 'GPS en vivo',   valor: mensajeros.filter(m => m.min_sin_gps !== null && m.min_sin_gps < 45).length, icon: MapPin, bg: 'bg-emerald-50', text: 'text-emerald-600' },
+            ].map(({ label, valor, icon: Icon, bg, text }) => (
+              <div key={label} className="metric-card">
+                <div className={`icon-circle ${bg} mb-3`}>
+                  <Icon className={`w-5 h-5 ${text}`} />
+                </div>
+                <div className="stat-number">{valor}</div>
+                <div className="text-sm text-gray-500 mt-0.5 font-medium">{label}</div>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Mapa interactivo */}
-        <div className="mb-6">
+        {/* Mapa */}
+        <div className="card mb-6 p-0 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between">
+            <span className="section-title">Mapa en tiempo real</span>
+            <span className="text-xs text-gray-400">{mensajeros.length} mensajero{mensajeros.length !== 1 ? 's' : ''} en vista</span>
+          </div>
           <MapaMensajeros mensajeros={mensajeros} />
         </div>
 
-        {/* Lista de mensajeros */}
-        <div className="bg-white rounded-lg shadow-sm">
+        {/* Lista */}
+        <div className="card p-0 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-50">
+            <span className="section-title">
+              {isB2B ? 'Mensajeros B2B y compartidos' : 'Mensajeros B2C y compartidos'}
+            </span>
+          </div>
+
           {loading ? (
-            <div className="p-8 text-center text-gray-500">Cargando...</div>
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Loader2 className={`w-7 h-7 animate-spin ${accent}`} />
+              <span className="text-sm text-gray-400">Cargando mensajeros…</span>
+            </div>
           ) : mensajeros.length === 0 ? (
-            <div className="p-12 text-center text-gray-400">
-              <Bike className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              No hay mensajeros registrados.
+            <div className="py-16 text-center">
+              <Bike className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+              <p className="text-sm text-gray-400">No hay mensajeros registrados para este canal.</p>
+              <button onClick={() => setShowModal(true)}
+                className={`mt-4 text-sm font-semibold ${accent} hover:underline`}>
+                + Registrar el primero
+              </button>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-gray-50">
               {mensajeros.map(m => (
-                <div
-                  key={m.id}
-                  className="p-4 hover:bg-gray-50 cursor-pointer transition"
-                  onClick={() => setSeleccionado(m)}
-                >
+                <div key={m.id}
+                  className="px-5 py-3.5 hover:bg-gray-50/70 cursor-pointer transition-colors"
+                  onClick={() => setSel(m)}>
                   <div className="flex items-center gap-4">
-                    {/* Indicador de estado */}
-                    <div className={`w-3 h-3 rounded-full ${getStatusColor(m)} flex-shrink-0`} />
 
-                    {/* Info principal */}
+                    {/* Dot estado */}
+                    <div className={`w-2.5 h-2.5 rounded-full ${dotColor(m)} flex-shrink-0 ring-2 ring-white`} />
+
+                    {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-2">
-                        <h3 className="font-semibold text-gray-900 truncate">{m.nombre}</h3>
-                        <span className="text-xs text-gray-500">
-                          {m.vehiculo} {m.placa && `• ${m.placa}`}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" /> {m.telefono}
-                        </span>
-                        {m.zona && (
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3" /> {m.zona}
-                          </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-gray-900 truncate">{m.nombre}</span>
+                        <span className="text-xs text-gray-400">{m.vehiculo}{m.placa ? ` · ${m.placa}` : ''}</span>
+                        {m.canal === 'ambos' && (
+                          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Ambos</span>
                         )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-400">
+                        <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{m.telefono}</span>
+                        {m.zona && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{m.zona}</span>}
                         <span className="flex items-center gap-1">
                           <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
                           {Number(m.calificacion_promedio || 5).toFixed(1)}
                         </span>
-                        <span className="text-xs">
-                          {m.pedidos_completados} entregas
-                        </span>
+                        <span>{m.pedidos_completados} entregas</span>
                       </div>
                     </div>
 
                     {/* Pedido activo */}
                     {m.pedido_activo ? (
-                      <div className="text-right">
-                        <div className="text-sm font-mono text-blue-600 font-semibold">
-                          {m.pedido_activo.numero_pedido}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {m.pedido_activo.cliente_nombre || m.pedido_activo.cliente_telefono}
-                        </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-xs font-mono font-bold text-blue-600">{m.pedido_activo.numero_pedido}</div>
+                        <div className="text-xs text-gray-400">{m.pedido_activo.cliente_nombre || m.pedido_activo.cliente_telefono}</div>
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">{getStatusText(m)}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0">{statusText(m)}</span>
                     )}
 
-                    {/* GPS status */}
+                    {/* GPS */}
                     {m.ultima_ubicacion_at ? (
-                      <div className="text-right text-xs">
+                      <div className="text-right text-xs flex-shrink-0">
                         <div className={`font-medium ${m.min_sin_gps !== null && m.min_sin_gps < 45 ? 'text-emerald-600' : 'text-yellow-600'}`}>
-                          <MapPin className="w-3 h-3 inline" /> hace {m.min_sin_gps}min
+                          <MapPin className="w-3 h-3 inline" /> {m.min_sin_gps}min
                         </div>
                         {m.ultima_lat && (
-                          <a
-                            href={`https://maps.google.com/?q=${m.ultima_lat},${m.ultima_lng}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <a href={`https://maps.google.com/?q=${m.ultima_lat},${m.ultima_lng}`}
+                            target="_blank" rel="noopener noreferrer"
                             onClick={e => e.stopPropagation()}
-                            className="text-blue-600 hover:underline"
-                          >
-                            Ver mapa
-                          </a>
+                            className="text-blue-500 hover:underline">Ver</a>
                         )}
                       </div>
                     ) : (
-                      <span className="text-xs text-gray-400">Sin GPS</span>
+                      <span className="text-xs text-gray-300 flex-shrink-0">Sin GPS</span>
                     )}
 
-                    {/* Toggle */}
+                    {/* Toggle disponible */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); toggleDisponible(m.id, m.disponible); }}
-                      className={`px-3 py-1 rounded text-xs font-medium ${
+                      onClick={e => { e.stopPropagation(); toggleDisponible(m.id, m.disponible); }}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors flex-shrink-0 ${
                         m.disponible
-                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
+                          ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}>
                       {m.disponible ? 'Activo' : 'Pausado'}
                     </button>
                   </div>
@@ -335,100 +294,146 @@ export default function MensajerosLive() {
             </div>
           )}
         </div>
+      </main>
 
-        {/* Detalle modal */}
-        {seleccionado && (
-          <Modal mensajero={seleccionado} onClose={() => setSeleccionado(null)} />
-        )}
-      </div>
+      {/* Modal registrar */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-md p-6 animate-in">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-gray-900">Registrar mensajero</h2>
+              <button onClick={() => setShowModal(false)}><X className="w-5 h-5 text-gray-300 hover:text-gray-500" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nombre completo *</label>
+                <input className="input-field mt-1" value={form.nombre}
+                  onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Juan García" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Teléfono WhatsApp *</label>
+                <input className="input-field mt-1" value={form.telefono}
+                  onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="3005292953" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Vehículo</label>
+                  <select className="input-field mt-1" value={form.vehiculo}
+                    onChange={e => setForm(f => ({ ...f, vehiculo: e.target.value }))}>
+                    <option value="moto">Moto</option>
+                    <option value="bicicleta">Bicicleta</option>
+                    <option value="carro">Carro</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Canal</label>
+                  <select className="input-field mt-1" value={form.canal}
+                    onChange={e => setForm(f => ({ ...f, canal: e.target.value as CanalMensajero }))}>
+                    <option value="b2c">B2C — Droguería Virtual</option>
+                    <option value="b2b">B2B — Mayorista</option>
+                    <option value="ambos">Ambos canales</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Ciudad</label>
+                  <input className="input-field mt-1" value={form.ciudad}
+                    onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Zona</label>
+                  <input className="input-field mt-1" value={form.zona}
+                    onChange={e => setForm(f => ({ ...f, zona: e.target.value }))} placeholder="Norte, Sur…" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Placa</label>
+                <input className="input-field mt-1" value={form.placa}
+                  onChange={e => setForm(f => ({ ...f, placa: e.target.value }))} placeholder="ABC123" />
+              </div>
+              {saveError && <p className="text-sm text-red-500">{saveError}</p>}
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setShowModal(false)}
+                className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button onClick={registrar} disabled={saving || !form.nombre || !form.telefono}
+                className={`flex-1 ${btnColor} text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50`}>
+                {saving ? 'Guardando…' : 'Registrar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detalle modal */}
+      {seleccionado && <DetalleModal mensajero={seleccionado} onClose={() => setSel(null)} accent={accent} />}
     </div>
   );
 }
 
-function Card({ label, valor, icon: Icon, color }: { label: string; valor: number; icon: any; color: string }) {
-  const colorMap: Record<string, string> = {
-    gray:    'text-gray-600 bg-gray-100',
-    emerald: 'text-emerald-600 bg-emerald-100',
-    green:   'text-green-600 bg-green-100',
-    blue:    'text-blue-600 bg-blue-100',
-  };
+function DetalleModal({ mensajero: m, onClose, accent }: { mensajero: Mensajero; onClose: () => void; accent: string }) {
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-500">{label}</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{valor}</p>
-        </div>
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Modal({ mensajero, onClose }: { mensajero: Mensajero; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-card-lg max-w-md w-full p-6 animate-in" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold">{mensajero.nombre}</h2>
-            <p className="text-gray-500">{mensajero.telefono} • {mensajero.vehiculo}</p>
+            <h2 className="text-lg font-bold text-gray-900">{m.nombre}</h2>
+            <p className="text-sm text-gray-400">{m.telefono} · {m.vehiculo}</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">×</button>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {mensajero.pedido_activo && (
-          <div className="bg-blue-50 rounded-lg p-4 mb-4">
-            <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Pedido activo: {mensajero.pedido_activo.numero_pedido}
+        {m.pedido_activo && (
+          <div className="bg-blue-50 rounded-xl p-4 mb-4 border border-blue-100">
+            <h3 className="text-sm font-semibold text-blue-800 mb-2 flex items-center gap-2">
+              <Package className="w-4 h-4" /> {m.pedido_activo.numero_pedido}
             </h3>
-            <p className="text-sm text-gray-700">Cliente: <strong>{mensajero.pedido_activo.cliente_nombre}</strong></p>
-            <p className="text-sm text-gray-700">Tel: {mensajero.pedido_activo.cliente_telefono}</p>
-            <p className="text-sm text-gray-700">Dirección: {mensajero.pedido_activo.cliente_direccion}</p>
-            <p className="text-sm font-semibold text-emerald-600 mt-2">
-              ${Number(mensajero.pedido_activo.total).toLocaleString('es-CO')}
-            </p>
+            <div className="text-sm text-gray-700 space-y-0.5">
+              <p>Cliente: <strong>{m.pedido_activo.cliente_nombre}</strong></p>
+              <p>Tel: {m.pedido_activo.cliente_telefono}</p>
+              <p>Dir: {m.pedido_activo.cliente_direccion}</p>
+              <p className={`font-semibold ${accent} mt-1`}>${Number(m.pedido_activo.total).toLocaleString('es-CO')}</p>
+            </div>
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="text-gray-500">Calificación</p>
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">Calificación</p>
             <p className="text-xl font-bold flex items-center gap-1">
-              <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
-              {Number(mensajero.calificacion_promedio || 5).toFixed(2)}
+              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+              {Number(m.calificacion_promedio || 5).toFixed(2)}
             </p>
           </div>
-          <div>
-            <p className="text-gray-500">Entregas completadas</p>
-            <p className="text-xl font-bold">{mensajero.pedidos_completados}</p>
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">Entregas</p>
+            <p className="text-xl font-bold">{m.pedidos_completados}</p>
           </div>
-          <div>
-            <p className="text-gray-500">Zona</p>
-            <p>{mensajero.zona || '—'}</p>
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">Zona</p>
+            <p className="font-medium text-gray-700">{m.zona || '—'}</p>
           </div>
-          <div>
-            <p className="text-gray-500">Última ubicación</p>
-            {mensajero.ultima_lat ? (
-              <a
-                href={`https://maps.google.com/?q=${mensajero.ultima_lat},${mensajero.ultima_lng}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:underline flex items-center gap-1"
-              >
-                <MapPin className="w-4 h-4" /> Abrir en Maps
+          <div className="bg-gray-50 rounded-xl p-3">
+            <p className="text-xs text-gray-400 mb-1">GPS</p>
+            {m.ultima_lat ? (
+              <a href={`https://maps.google.com/?q=${m.ultima_lat},${m.ultima_lng}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-blue-500 hover:underline text-sm flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5" /> Ver en Maps
               </a>
-            ) : '—'}
+            ) : <p className="text-gray-400 text-sm">Sin GPS</p>}
           </div>
         </div>
 
-        {mensajero.min_sin_gps !== null && mensajero.min_sin_gps > 60 && (
-          <div className="mt-4 p-3 bg-yellow-50 rounded flex items-center gap-2 text-yellow-800 text-sm">
-            <AlertCircle className="w-4 h-4" />
-            GPS sin actualizarse hace más de 1 hora. Pídele que comparta su ubicación.
+        {m.min_sin_gps !== null && m.min_sin_gps > 60 && (
+          <div className="mt-4 p-3 bg-yellow-50 rounded-xl flex items-center gap-2 text-yellow-700 text-sm border border-yellow-100">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            GPS sin actualizar hace más de 1 hora.
           </div>
         )}
       </div>

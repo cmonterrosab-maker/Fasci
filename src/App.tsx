@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DrogueriaAuthProvider, useDrogueriaAuth } from './contexts/DrogueriaAuthContext';
 import { AdminAuthProvider, useAdminAuth } from './contexts/AdminAuthContext';
+import { CanalProvider } from './contexts/CanalContext';
 
 import Index from './pages/Index';
 import Login from './pages/Login';
@@ -17,8 +18,7 @@ import AdminMedicamentos from './pages/admin/Medicamentos';
 import AdminPedidos from './pages/admin/Pedidos';
 import MetricasRealtime from './pages/admin/MetricasRealtime';
 import MensajerosLive from './pages/admin/MensajerosLive';
-import Conversaciones from './pages/admin/Conversaciones';
-import CuponesLealtad from './pages/admin/CuponesLealtad';
+import OrdenesCompraB2B from './pages/admin/OrdenesCompraB2B';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,7 +76,9 @@ function DrogueriaAuthLayout() {
 function AdminAuthLayout() {
   return (
     <AdminAuthProvider>
-      <Outlet />
+      <CanalProvider>
+        <Outlet />
+      </CanalProvider>
     </AdminAuthProvider>
   );
 }
@@ -178,18 +180,10 @@ function AppRoutes() {
           }
         />
         <Route
-          path="/admin/conversaciones"
+          path="/admin/ordenes-b2b"
           element={
             <ProtectedAdminRoute>
-              <Conversaciones />
-            </ProtectedAdminRoute>
-          }
-        />
-        <Route
-          path="/admin/lealtad"
-          element={
-            <ProtectedAdminRoute>
-              <CuponesLealtad />
+              <OrdenesCompraB2B />
             </ProtectedAdminRoute>
           }
         />

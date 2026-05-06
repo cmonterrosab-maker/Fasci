@@ -433,6 +433,7 @@ class MensajeroService {
       const updateData = {
         status: 'entregado',
         entregado_at: new Date().toISOString(),
+        calificacion_solicitada_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
       if (fotoUrl)  updateData.foto_entrega_url  = fotoUrl;
@@ -515,7 +516,7 @@ class MensajeroService {
    */
   async registrarMensajero(datos) {
     try {
-      const { nombre, telefono, cedula, ciudad, zona, vehiculo = 'moto', placa } = datos;
+      const { nombre, telefono, cedula, ciudad, zona, vehiculo = 'moto', placa, canal = 'b2c' } = datos;
 
       if (!nombre || !nombre.trim()) {
         return { success: false, error: 'El nombre del mensajero es obligatorio.' };
@@ -533,9 +534,14 @@ class MensajeroService {
         };
       }
 
-      const vehiculosValidos = ['moto', 'bicicleta', 'pie'];
+      const vehiculosValidos = ['moto', 'bicicleta', 'pie', 'carro'];
       if (vehiculo && !vehiculosValidos.includes(vehiculo)) {
         return { success: false, error: `Vehículo inválido. Valores permitidos: ${vehiculosValidos.join(', ')}` };
+      }
+
+      const canalesValidos = ['b2b', 'b2c', 'ambos'];
+      if (!canalesValidos.includes(canal)) {
+        return { success: false, error: `Canal inválido. Valores permitidos: ${canalesValidos.join(', ')}` };
       }
 
       const nuevaMensajero = {
@@ -546,6 +552,7 @@ class MensajeroService {
         zona: zona || null,
         vehiculo,
         placa: placa || null,
+        canal,
       };
 
       const { data: mensajero, error } = await this.supabase

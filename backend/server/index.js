@@ -67,6 +67,10 @@ const metricasService = new MetricasService(supabase);
 const calificacionService = new CalificacionService(supabase);
 const lealtadService = new LealtadService(supabase);
 
+// ─── Trust proxy (Render, Railway, Heroku usan reverse proxy) ────────────────
+// Necesario para que express-rate-limit lea X-Forwarded-For correctamente.
+app.set('trust proxy', 1);
+
 // ─── Middleware de seguridad ──────────────────────────────────────────────────
 
 applySecurityMiddleware(app);
@@ -312,21 +316,26 @@ app.get('/api/admin/droguerias', async (req, res) => {
  */
 app.post('/api/admin/droguerias', async (req, res) => {
   try {
-    const { nombre, email, telefono, whatsapp_numero, ciudad, direccion, barrio, nit } = req.body;
+    const { nombre, email, telefono, whatsapp_numero, ciudad, direccion, barrio, nit, tipo } = req.body;
     if (!nombre || !telefono || !ciudad) {
       return res.status(400).json({ error: 'nombre, telefono y ciudad son requeridos.' });
     }
+    const telefonoLimpio = telefono.trim().replace(/\D/g,'').slice(-10);
+    const whatsappLimpio = whatsapp_numero
+      ? whatsapp_numero.trim().replace(/\D/g,'').slice(-10)
+      : telefonoLimpio;
     const { data, error } = await supabase
       .from('droguerias')
       .insert({
         nombre:          nombre.trim(),
         email:           email?.trim() || null,
-        telefono:        telefono.trim().replace(/\D/g,'').slice(-10),
-        whatsapp_numero: (whatsapp_numero || telefono).trim().replace(/\D/g,'').slice(-10),
+        telefono:        telefonoLimpio,
+        whatsapp_numero: whatsappLimpio,
         ciudad:          ciudad.trim(),
         direccion:       direccion?.trim() || null,
         barrio:          barrio?.trim() || null,
         nit:             nit?.trim() || null,
+        tipo:            (['operador','socio'].includes(tipo)) ? tipo : 'socio',
         status:          'pendiente',
       })
       .select()
@@ -1384,7 +1393,7 @@ app.get('/api/calificaciones/recientes', async (req, res) => {
   try {
     const { data } = await supabase
       .from('calificaciones')
-      .select('*, mensajeros(nombre), pedidos(numero_pedido)')
+      .select('*, mensajeros!mensajero_id(nombre), pedidos!pedido_id(numero_pedido)')
       .order('created_at', { ascending: false })
       .limit(parseInt(req.query.limite) || 20);
     res.json({ success: true, data: data || [] });
@@ -1443,6 +1452,174 @@ app.post('/api/lealtad/validar-cupon', async (req, res) => {
     const { codigo, telefono, total, costoDomicilio } = req.body;
     const r = await lealtadService.aplicarCupon(codigo, telefono, total, costoDomicilio);
     res.json(r);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin: Órdenes de Compra B2B
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/ordenes-compra
+ * Lista órdenes de compra B2B con paginación y filtros.
+ */
+app.get('/api/admin/ordenes-compra', async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status, drogueriaId } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    let query = supabase
+      .from('ordenes_compra')
+      .select(`
+        id, numero_orden, status, subtotal, descuento, total,
+        metodo_pago, canal, notas, created_at, pagada_at, entregada_at,
+        compradora_nombre, compradora_telefono, compradora_nit,
+        drogueria_compradora_id,
+        droguerias!drogueria_compradora_id (nombre, ciudad),
+        detalle_ordenes_compra (
+          id, nombre_medicamento, presentacion, cantidad, precio_mayorista, subtotal
+        )
+      `, { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + parseInt(limit) - 1);
+
+    if (status) query = query.eq('status', status);
+    if (drogueriaId) query = query.eq('drogueria_compradora_id', drogueriaId);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+
+    res.json({ ordenes: data, total: count, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) {
+    console.error('[Admin] Error listando órdenes compra B2B:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PATCH /api/admin/ordenes-compra/:id/status
+ */
+app.patch('/api/admin/ordenes-compra/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const permitidos = ['cotizacion','confirmada','pago_pendiente','pagada','en_preparacion','enviada','entregada','cancelada'];
+    if (!status || !permitidos.includes(status)) {
+      return res.status(400).json({ error: `Status inválido. Permitidos: ${permitidos.join(', ')}` });
+    }
+    const extra = {};
+    if (status === 'pagada') extra.pagada_at = new Date().toISOString();
+    if (status === 'entregada') extra.entregada_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('ordenes_compra')
+      .update({ status, ...extra, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, orden: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/b2b/recalcular-perfiles
+ * Recalcula perfiles de compra para todas las droguerías activas (o una específica).
+ */
+app.post('/api/admin/b2b/recalcular-perfiles', async (req, res) => {
+  try {
+    const { drogueriaId } = req.body;
+    const B2BService = require('../services/b2b-service');
+    const b2b = new B2BService(supabase);
+
+    let droguerias;
+    if (drogueriaId) {
+      const { data } = await supabase.from('droguerias').select('id,nombre').eq('id', drogueriaId).single();
+      droguerias = data ? [data] : [];
+    } else {
+      const { data } = await supabase.from('droguerias').select('id,nombre').eq('status', 'activo');
+      droguerias = data || [];
+    }
+
+    const resultados = [];
+    for (const d of droguerias) {
+      const r = await b2b.calcularPerfilCompra(d.id);
+      resultados.push({ drogueria: d.nombre, productos: r.productos.length, frecuencia_dias: r.frecuencia_dias });
+    }
+
+    res.json({ success: true, procesadas: droguerias.length, resultados });
+  } catch (err) {
+    console.error('[Admin B2B] recalcular-perfiles error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/b2b/enviar-alertas
+ * Envía WhatsApp proactivo a droguerías que deben reabastecer hoy.
+ */
+app.post('/api/admin/b2b/enviar-alertas', async (req, res) => {
+  try {
+    const B2BService = require('../services/b2b-service');
+    const { sendWhatsAppMessage } = require('../services/whatsapp-service');
+    const b2b = new B2BService(supabase);
+
+    const grupos = await b2b.getDrogueriasDueForReorder();
+    const enviados = [];
+    const errores = [];
+
+    for (const { drogueria, productos } of grupos) {
+      const telefono = drogueria.whatsapp_numero || drogueria.telefono;
+      if (!telefono) continue;
+      try {
+        const mensaje = b2b.construirAlertaReabastecimiento(drogueria, productos);
+        await sendWhatsAppMessage(telefono, mensaje);
+
+        // Marcar alerta enviada para cada producto
+        for (const p of productos) {
+          await supabase
+            .from('perfiles_compra_b2b')
+            .update({ alerta_enviada_at: new Date().toISOString() })
+            .eq('drogueria_id', drogueria.id)
+            .eq('nombre_medicamento', p.nombre_medicamento);
+        }
+        enviados.push({ drogueria: drogueria.nombre, productos: productos.length });
+      } catch (e) {
+        errores.push({ drogueria: drogueria.nombre, error: e.message });
+      }
+    }
+
+    res.json({ success: true, enviados: enviados.length, errores: errores.length, detalle: { enviados, errores } });
+  } catch (err) {
+    console.error('[Admin B2B] enviar-alertas error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/b2b/perfiles
+ * Lista perfiles de compra de todas las droguerías.
+ */
+app.get('/api/admin/b2b/perfiles', async (req, res) => {
+  try {
+    const { drogueriaId } = req.query;
+    let query = supabase
+      .from('perfiles_compra_b2b')
+      .select(`
+        *,
+        droguerias!drogueria_id (nombre, ciudad, whatsapp_numero)
+      `)
+      .order('veces_ordenado', { ascending: false });
+
+    if (drogueriaId) query = query.eq('drogueria_id', drogueriaId);
+
+    const { data, error } = await query.limit(100);
+    if (error) throw error;
+    res.json({ perfiles: data || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

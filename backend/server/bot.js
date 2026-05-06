@@ -69,6 +69,7 @@ const SESION_TTL_MS   = 30 * 60 * 1000; // 30 minutos
 const NEQUI_NUMERO    = process.env.NEQUI_NUMERO    || '3001234567';
 const DAVIPLATA_NUMERO = process.env.DAVIPLATA_NUMERO || '3001234567';
 const NOMBRE_CUENTA   = process.env.NOMBRE_CUENTA   || 'Droguería Virtual SAS';
+const ADMIN_WHATSAPP  = process.env.ADMIN_WHATSAPP  || '';
 
 // ─── Estados del flujo ────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ const ESTADOS = {
   B2B_COTIZACION:    'b2b_cotizacion',
   B2B_PAGO:          'b2b_pago',
   B2B_COMPROBANTE:   'b2b_comprobante',
+  B2B_REPETIR:       'b2b_repetir',
 };
 
 // ─── Gestión de sesiones ──────────────────────────────────────────────────────
@@ -1053,10 +1055,68 @@ async function procesarPedidoFinal(telefono, sesion) {
  *   PAGO       → instrucciones de pago Nequi/Daviplata
  *   COMPROBANTE → recibe imagen, crea orden, descuenta stock, asigna mensajero
  */
+// Frases NLU para "lo de siempre" / pedido habitual
+const FRASES_HABITUAL = [
+  'lo de siempre','lo mismo','el pedido habitual','pedido habitual',
+  'lo usual','lo de antes','lo habitual','surtir','surtido normal',
+  'reabastecer','rebastecer','necesito surtir','quiero surtir',
+  'dame lo de siempre','dame lo mismo','lo frecuente',
+];
+
 async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
   const txt   = (mensaje || '').trim();
   const upper = txt.toUpperCase();
+  const txtNorm = txt.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const sesion = obtenerSesion(telefono);
+
+  // ── NLU: detectar "lo de siempre" / pedido habitual ──────────────────────
+  const esFraseHabitual = FRASES_HABITUAL.some(f =>
+    txtNorm.includes(f.normalize('NFD').replace(/[̀-ͯ]/g, ''))
+  );
+  if (esFraseHabitual && drogueria.id) {
+    try {
+      const perfil = await b2bService.getPerfilCompra(drogueria.id, 6);
+      if (perfil && perfil.length > 0) {
+        // Cargar top productos del perfil en el carrito
+        sesion.carrito = perfil.map(p => ({
+          nombre: p.nombre_medicamento,
+          presentacion: '',
+          laboratorio: '',
+          catalogo_id: p.catalogo_id,
+          medicamento_id: p.medicamento_id,
+          cantidad: Math.round(p.cantidad_promedio),
+          precio_mayorista: 0, // se actualizara al confirmar
+          subtotal: 0,
+        }));
+        // Enriquecer precios desde catalogo
+        for (const item of sesion.carrito) {
+          if (item.catalogo_id) {
+            const { data: cat } = await supabase
+              .from('catalogos')
+              .select('precio_mayorista, stock')
+              .eq('id', item.catalogo_id)
+              .maybeSingle();
+            if (cat) {
+              item.precio_mayorista = Number(cat.precio_mayorista) || 0;
+              item.subtotal = item.cantidad * item.precio_mayorista;
+            }
+          }
+        }
+        sesion.b2b = { drogueria_id: drogueria.id };
+        sesion.estado = ESTADOS.B2B_COTIZACION;
+        guardarSesion(telefono, sesion);
+        return (
+          `Cargue tu pedido habitual:\n\n` +
+          b2bService.generarTextoCotizacion(sesion.carrito, drogueria)
+        );
+      } else {
+        // Sin perfil aun -> calcular ahora y continuar normal
+        b2bService.calcularPerfilCompra(drogueria.id).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[Bot B2B] NLU habitual error:', e.message);
+    }
+  }
 
   // Comandos globales B2B
   if (['CANCELAR', 'SALIR', '0', 'MENU', 'INICIO'].includes(upper)) {
@@ -1087,6 +1147,24 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
       return `📦 *Tus últimas órdenes de compra:*\n\n${lista}\n\nEscribe *1* para nueva cotización.`;
     }
 
+    // Primera vez (INICIO): verificar si hay un pedido anterior para ofrecer REPETIR
+    if (sesion.estado === ESTADOS.INICIO && drogueria.id) {
+      try {
+        const ultimoPedido = await b2bService.getUltimoPedidoConfirmado(drogueria.id);
+        if (ultimoPedido && ultimoPedido.detalle_ordenes_compra?.length) {
+          sesion.estado = ESTADOS.B2B_REPETIR;
+          sesion.b2b = {
+            drogueria_id: drogueria.id,
+            ultimoPedidoItems: ultimoPedido.detalle_ordenes_compra,
+          };
+          guardarSesion(telefono, sesion);
+          return b2bService.construirOfertaRepetir(ultimoPedido, drogueria);
+        }
+      } catch (e) {
+        console.warn('[Bot B2B] Error consultando último pedido:', e.message);
+      }
+    }
+
     // Opción 1 o cualquier otra cosa → cotizar
     sesion.estado = ESTADOS.B2B_BUSCANDO;
     sesion.carrito = [];
@@ -1098,6 +1176,41 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
       `Escribe el nombre del medicamento (ej: *acetaminofen*, *ibuprofeno*).\n\n` +
       `_Precios especiales mayoristas aplican según volumen._`
     );
+  }
+
+  // ── REPETIR ÚLTIMO PEDIDO ─────────────────────────────────────────────────
+  if (sesion.estado === ESTADOS.B2B_REPETIR) {
+    if (upper === 'REPETIR' || upper === 'SI' || upper === 'SÍ' || txt === '1') {
+      const items = sesion.b2b.ultimoPedidoItems || [];
+      if (!items.length) {
+        sesion.estado = ESTADOS.B2B_BUSCANDO;
+        sesion.carrito = [];
+        sesion.b2b = { drogueria_id: drogueria.id };
+        guardarSesion(telefono, sesion);
+        return `💊 ¿Qué medicamento deseas cotizar?\n\nEscribe el nombre del producto.`;
+      }
+      // Cargar items del último pedido en el carrito
+      sesion.carrito = items.map(i => ({
+        nombre: i.nombre_medicamento,
+        presentacion: i.presentacion || '',
+        laboratorio: i.laboratorio || '',
+        catalogo_id: i.catalogo_id,
+        medicamento_id: i.medicamento_id,
+        cantidad: i.cantidad,
+        precio_mayorista: Number(i.precio_mayorista),
+        subtotal: Number(i.cantidad) * Number(i.precio_mayorista),
+      }));
+      sesion.b2b.drogueria_id = drogueria.id;
+      sesion.estado = ESTADOS.B2B_COTIZACION;
+      guardarSesion(telefono, sesion);
+      return b2bService.generarTextoCotizacion(sesion.carrito, drogueria);
+    }
+    // NUEVO o cualquier otra cosa → flujo normal
+    sesion.estado = ESTADOS.B2B_BUSCANDO;
+    sesion.carrito = [];
+    sesion.b2b = { drogueria_id: drogueria.id };
+    guardarSesion(telefono, sesion);
+    return `💊 ¿Qué medicamento deseas cotizar?\n\nEscribe el nombre del producto.`;
   }
 
   // ── BUSCANDO ──────────────────────────────────────────────────────────────
@@ -1304,6 +1417,13 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
 
       if (!resultado.success) throw new Error(resultado.error || 'Error creando orden');
       orden = resultado.orden;
+
+      // Recalcular perfil en background (no bloquear respuesta)
+      if (resultado.success && drogueria.id) {
+        b2bService.calcularPerfilCompra(drogueria.id).catch(e =>
+          console.warn('[Bot B2B] Error recalculando perfil:', e.message)
+        );
+      }
     } catch (err) {
       console.error('[Bot B2B] Error creando orden:', err.message);
       return (
@@ -1317,6 +1437,28 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
       await b2bService.descontarStockOrden(orden.id);
     } catch (errInv) {
       console.warn('[Bot B2B] Error descontando stock:', errInv.message);
+    }
+
+    // Notificar admin sobre nueva orden B2B
+    if (ADMIN_WHATSAPP) {
+      const resumenItems = (sesion.carrito || []).slice(0, 3)
+        .map(i => `  • ${i.nombre} × ${i.cantidad}`)
+        .join('\n');
+      const msgAdmin = [
+        `🏪 *Nueva Orden B2B*`,
+        ``,
+        `📋 ${orden.numero_orden}`,
+        `🏢 ${drogueria.nombre}`,
+        `📞 ${telefono}`,
+        `💰 Total: $${Number(orden.total).toLocaleString('es-CO')}`,
+        ``,
+        resumenItems,
+        sesion.carrito.length > 3 ? `  _...y ${sesion.carrito.length - 3} producto(s) más_` : '',
+        ``,
+        `Comprobante adjunto. Verificar y despachar.`,
+      ].filter(l => l !== undefined).join('\n');
+      sendWhatsAppMessage(ADMIN_WHATSAPP, msgAdmin)
+        .catch(e => console.warn('[Bot B2B] No se pudo notificar al admin:', e.message));
     }
 
     // Asignar mensajero

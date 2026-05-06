@@ -78,8 +78,10 @@ CREATE TABLE IF NOT EXISTS droguerias (
   whatsapp_numero       VARCHAR(50),
   lat                   DECIMAL(10,8),
   lng                   DECIMAL(11,8),
-  status                VARCHAR(50) DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'active', 'inactive', 'suspended')),
+  status                VARCHAR(50) DEFAULT 'pendiente'
+    CHECK (status IN ('pendiente', 'activo', 'inactivo', 'suspendido', 'rechazado')),
+  tipo                  VARCHAR(20) DEFAULT 'socio'
+    CHECK (tipo IN ('operador', 'socio')),
   verificacion_notas    TEXT,
   total_pedidos         INTEGER DEFAULT 0,
   calificacion_promedio DECIMAL(3,2) DEFAULT 5.00,
@@ -352,6 +354,10 @@ CREATE TABLE IF NOT EXISTS mensajeros (
   zona VARCHAR(100), -- barrio/zona de cobertura
   vehiculo VARCHAR(50) DEFAULT 'moto', -- 'moto', 'bicicleta', 'pie'
   placa VARCHAR(20),
+
+  -- Canal operativo
+  canal VARCHAR(20) DEFAULT 'b2c'
+    CHECK (canal IN ('b2b', 'b2c', 'ambos')),
 
   -- Status
   status VARCHAR(50) DEFAULT 'activo' CHECK (status IN ('activo', 'inactivo', 'suspendido')),

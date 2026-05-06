@@ -29,7 +29,7 @@ INSERT INTO droguerias (
   '3001234567',                   -- ⚠️ Mismo teléfono de WhatsApp Business
   10.4236,                        -- Lat: Pie de la Popa, Cartagena (ajustar)
   -75.5378,                       -- Lng: Pie de la Popa, Cartagena (ajustar)
-  'active',
+  'activo',
   '{"lunes":"7:00-21:00","martes":"7:00-21:00","miercoles":"7:00-21:00","jueves":"7:00-21:00","viernes":"7:00-21:00","sabado":"8:00-20:00","domingo":"9:00-18:00"}'::jsonb
 )
 ON CONFLICT (email) DO UPDATE SET

@@ -43,7 +43,7 @@ class CalificacionService {
         .select(`
           id, numero_pedido, cliente_telefono, cliente_nombre,
           status, entregado_at, calificacion_solicitada_at,
-          mensajero_id, mensajeros ( nombre )
+          mensajero_id, mensajeros!mensajero_id ( nombre )
         `)
         .eq('id', pedidoId)
         .maybeSingle();

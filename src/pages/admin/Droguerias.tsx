@@ -6,7 +6,12 @@ import {
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
 
-const FORM_VACIO = { nombre: '', email: '', telefono: '', ciudad: 'Cartagena', direccion: '', barrio: '', nit: '' };
+const FORM_VACIO = { nombre: '', email: '', telefono: '', whatsapp_numero: '', ciudad: 'Cartagena', direccion: '', barrio: '', nit: '', tipo: 'socio' };
+
+const TIPO_CONFIG: Record<string, { label: string; color: string }> = {
+  operador: { label: 'Operador',  color: 'bg-indigo-100 text-indigo-800' },
+  socio:    { label: 'Socio B2B', color: 'bg-purple-100 text-purple-700' },
+};
 
 interface Drogueria {
   id: string;
@@ -15,32 +20,28 @@ interface Drogueria {
   telefono: string;
   ciudad: string;
   direccion: string;
-  estado: 'activa' | 'pendiente' | 'suspendida';
+  tipo: 'operador' | 'socio';
+  estado: 'activo' | 'pendiente' | 'suspendido' | 'inactivo' | 'rechazado';
   pedidosTotales: number;
   fechaRegistro: string;
 }
 
-const MOCK_DROGUERIAS: Drogueria[] = [
-  { id: '1', nombre: 'Drogueria La Salud', email: 'lasalud@mail.com', telefono: '+573001234567', ciudad: 'Bogota', direccion: 'Calle 50 #30-25', estado: 'activa', pedidosTotales: 342, fechaRegistro: '2024-01-15' },
-  { id: '2', nombre: 'Farmacia El Alivio', email: 'elalivio@mail.com', telefono: '+574201234567', ciudad: 'Medellin', direccion: 'Carrera 80 #45-12', estado: 'activa', pedidosTotales: 287, fechaRegistro: '2024-02-01' },
-  { id: '3', nombre: 'Drogueria San Pedro', email: 'sanpedro@mail.com', telefono: '+572301234567', ciudad: 'Cali', direccion: 'Av. Roosevelt #25-18', estado: 'pendiente', pedidosTotales: 0, fechaRegistro: '2024-11-20' },
-  { id: '4', nombre: 'Farmacia Central', email: 'central@mail.com', telefono: '+575001234567', ciudad: 'Barranquilla', direccion: 'Calle 72 #40-20', estado: 'activa', pedidosTotales: 198, fechaRegistro: '2024-03-10' },
-  { id: '5', nombre: 'Drogueria Vital', email: 'vital@mail.com', telefono: '+577001234567', ciudad: 'Bucaramanga', direccion: 'Carrera 18 #30-10', estado: 'suspendida', pedidosTotales: 45, fechaRegistro: '2024-04-05' },
-  { id: '6', nombre: 'Pharmacity Unicentro', email: 'unicentro@mail.com', telefono: '+573501234567', ciudad: 'Bogota', direccion: 'Cra 15 #123-30 Local 201', estado: 'activa', pedidosTotales: 521, fechaRegistro: '2023-12-01' },
-];
+const MOCK_DROGUERIAS: Drogueria[] = [];
 
 const PAGE_SIZE = 10;
 
-const ESTADO_CONFIG = {
-  activa: { label: 'Activa', color: 'bg-green-100 text-green-800' },
-  pendiente: { label: 'Pendiente aprobacion', color: 'bg-yellow-100 text-yellow-800' },
-  suspendida: { label: 'Suspendida', color: 'bg-red-100 text-red-800' },
+const ESTADO_CONFIG: Record<string, { label: string; color: string }> = {
+  activo:     { label: 'Activa',              color: 'bg-green-100 text-green-800' },
+  pendiente:  { label: 'Pendiente aprobación', color: 'bg-yellow-100 text-yellow-800' },
+  suspendido: { label: 'Suspendida',           color: 'bg-red-100 text-red-800' },
+  inactivo:   { label: 'Inactiva',             color: 'bg-gray-100 text-gray-600' },
+  rechazado:  { label: 'Rechazada',            color: 'bg-red-200 text-red-900' },
 };
 
 export default function AdminDroguerias() {
   const [droguerias, setDroguerias] = useState<Drogueria[]>(MOCK_DROGUERIAS);
   const [busqueda, setBusqueda] = useState('');
-  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'activa' | 'pendiente' | 'suspendida'>('todos');
+  const [filtroEstado, setFiltroEstado] = useState<'todos' | 'activo' | 'pendiente' | 'suspendido'>('todos');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
@@ -49,8 +50,14 @@ export default function AdminDroguerias() {
       setLoading(true);
       try {
         const res = await axios.get('/api/admin/droguerias');
-        const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
-        setDroguerias(data);
+        const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
+        setDroguerias(raw.map((d: any) => ({
+          ...d,
+          tipo: d.tipo ?? 'socio',
+          estado: d.status ?? d.estado ?? 'pendiente',
+          fechaRegistro: d.created_at ?? d.fechaRegistro ?? '',
+          pedidosTotales: d.total_pedidos ?? d.pedidosTotales ?? 0,
+        })));
       } catch {
         // usar mock
       } finally {
@@ -61,13 +68,13 @@ export default function AdminDroguerias() {
   }, []);
 
   const aprobar = async (id: string) => {
-    setDroguerias(prev => prev.map(d => d.id === id ? { ...d, estado: 'activa' } : d));
-    try { await axios.patch(`/api/admin/droguerias/${id}`, { estado: 'activa' }); } catch {}
+    setDroguerias(prev => prev.map(d => d.id === id ? { ...d, estado: 'activo' as const } : d));
+    try { await axios.put(`/api/admin/droguerias/${id}/status`, { status: 'activo' }); } catch {}
   };
 
   const suspender = async (id: string) => {
-    setDroguerias(prev => prev.map(d => d.id === id ? { ...d, estado: 'suspendida' } : d));
-    try { await axios.patch(`/api/admin/droguerias/${id}`, { estado: 'suspendida' }); } catch {}
+    setDroguerias(prev => prev.map(d => d.id === id ? { ...d, estado: 'suspendido' as const } : d));
+    try { await axios.put(`/api/admin/droguerias/${id}/status`, { status: 'suspendido' }); } catch {}
   };
 
   const filtradas = droguerias.filter(d => {
@@ -95,17 +102,23 @@ export default function AdminDroguerias() {
       setForm(FORM_VACIO);
       // Recargar lista
       const res = await axios.get('/api/admin/droguerias');
-      const data = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
-      setDroguerias(data);
+      const raw = Array.isArray(res.data) ? res.data : (res.data?.data ?? res.data?.droguerias ?? []);
+      setDroguerias(raw.map((d: any) => ({
+        ...d,
+        tipo: d.tipo ?? 'socio',
+        estado: d.status ?? d.estado ?? 'pendiente',
+        fechaRegistro: d.created_at ?? d.fechaRegistro ?? '',
+        pedidosTotales: d.total_pedidos ?? d.pedidosTotales ?? 0,
+      })));
     } catch (err: any) {
       setSaveError(err?.response?.data?.error || 'Error al registrar');
     } finally { setSaving(false); }
   };
 
-  const pendientesCount = droguerias.filter(d => d.estado === 'pendiente').length;
+  const pendientesCount = droguerias.filter(d => d.estado === 'pendiente' || d.estado === 'inactivo').length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#f4f6f9]">
       <AdminNavbar />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -141,9 +154,14 @@ export default function AdminDroguerias() {
                       onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Droguería La Salud" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-700">Teléfono / WhatsApp *</label>
+                    <label className="text-sm font-medium text-gray-700">Teléfono *</label>
                     <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.telefono}
                       onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} placeholder="3001234567" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">WhatsApp B2B</label>
+                    <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.whatsapp_numero}
+                      onChange={e => setForm(f => ({ ...f, whatsapp_numero: e.target.value }))} placeholder="3001234567 (para pedidos mayoristas)" />
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-700">Ciudad *</label>
@@ -164,6 +182,14 @@ export default function AdminDroguerias() {
                     <label className="text-sm font-medium text-gray-700">NIT</label>
                     <input className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.nit}
                       onChange={e => setForm(f => ({ ...f, nit: e.target.value }))} placeholder="900123456-1" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Tipo</label>
+                    <select className="mt-1 w-full border rounded-lg px-3 py-2 text-sm" value={form.tipo}
+                      onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+                      <option value="socio">Socio B2B (compra al mayorista)</option>
+                      <option value="operador">Operador (bodega / Droguería Virtual)</option>
+                    </select>
                   </div>
                 </div>
                 {saveError && <p className="text-sm text-red-600">{saveError}</p>}
@@ -202,9 +228,9 @@ export default function AdminDroguerias() {
               className="input-field w-auto"
             >
               <option value="todos">Todos los estados</option>
-              <option value="activa">Activas</option>
+              <option value="activo">Activas</option>
               <option value="pendiente">Pendientes</option>
-              <option value="suspendida">Suspendidas</option>
+              <option value="suspendido">Suspendidas</option>
             </select>
           </div>
         </div>
@@ -218,6 +244,7 @@ export default function AdminDroguerias() {
                   <th className="px-6 py-4">Drogueria</th>
                   <th className="px-6 py-4">Contacto</th>
                   <th className="px-6 py-4">Ciudad</th>
+                  <th className="px-6 py-4">Tipo</th>
                   <th className="px-6 py-4">Estado</th>
                   <th className="px-6 py-4">Pedidos</th>
                   <th className="px-6 py-4">Registro</th>
@@ -227,13 +254,13 @@ export default function AdminDroguerias() {
               <tbody className="divide-y divide-gray-50">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12">
+                    <td colSpan={8} className="text-center py-12">
                       <Loader2 className="h-8 w-8 animate-spin text-green-600 mx-auto" />
                     </td>
                   </tr>
                 ) : paginadas.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-gray-400">
+                    <td colSpan={8} className="text-center py-12 text-gray-400">
                       No se encontraron droguerias
                     </td>
                   </tr>
@@ -270,6 +297,11 @@ export default function AdminDroguerias() {
                           </div>
                         </td>
                         <td className="px-6 py-4">
+                          {(() => { const t = TIPO_CONFIG[d.tipo] ?? TIPO_CONFIG['socio']; return (
+                            <span className={`badge ${t.color}`}>{t.label}</span>
+                          ); })()}
+                        </td>
+                        <td className="px-6 py-4">
                           <span className={`badge ${estadoConf.color}`}>{estadoConf.label}</span>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">{d.pedidosTotales}</td>
@@ -278,7 +310,7 @@ export default function AdminDroguerias() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-2">
-                            {d.estado === 'pendiente' && (
+                            {(d.estado === 'pendiente' || d.estado === 'inactivo' || d.estado === 'rechazado') && (
                               <button
                                 onClick={() => aprobar(d.id)}
                                 className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-medium bg-green-50 px-2 py-1 rounded-lg"
@@ -287,7 +319,7 @@ export default function AdminDroguerias() {
                                 Aprobar
                               </button>
                             )}
-                            {d.estado === 'activa' && (
+                            {d.estado === 'activo' && (
                               <button
                                 onClick={() => suspender(d.id)}
                                 className="flex items-center gap-1 text-xs text-red-600 hover:text-red-800 font-medium bg-red-50 px-2 py-1 rounded-lg"
@@ -296,7 +328,7 @@ export default function AdminDroguerias() {
                                 Suspender
                               </button>
                             )}
-                            {d.estado === 'suspendida' && (
+                            {d.estado === 'suspendido' && (
                               <button
                                 onClick={() => aprobar(d.id)}
                                 className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium bg-blue-50 px-2 py-1 rounded-lg"
