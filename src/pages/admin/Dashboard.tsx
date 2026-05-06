@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import {
   Store, ShoppingBag, Pill, TrendingUp, MapPin,
-  Package, Brain, ArrowRight, Loader2,
+  Package, Brain, ArrowRight, Loader2, CheckCircle, XCircle, Clock, ImageIcon,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -215,44 +215,73 @@ function DashboardB2C() {
 // B2B Dashboard
 // ──────────────────────────────────────────────
 const ORDEN_STATUS: Record<string, { label: string; color: string }> = {
-  pendiente:  { label: 'Pendiente',  color: 'bg-amber-50 text-amber-700' },
-  confirmado: { label: 'Confirmado', color: 'bg-blue-50 text-blue-700' },
-  en_proceso: { label: 'En proceso', color: 'bg-violet-50 text-violet-700' },
-  despachado: { label: 'Despachado', color: 'bg-indigo-50 text-indigo-700' },
-  entregado:  { label: 'Entregado',  color: 'bg-emerald-50 text-emerald-700' },
-  cancelado:  { label: 'Cancelado',  color: 'bg-red-50 text-red-700' },
+  cotizacion:     { label: 'Cotización',     color: 'bg-gray-100 text-gray-600' },
+  confirmada:     { label: 'Confirmada',     color: 'bg-blue-50 text-blue-700' },
+  pago_pendiente: { label: 'Pago pendiente', color: 'bg-amber-50 text-amber-700' },
+  pagada:         { label: 'Pagada',         color: 'bg-emerald-50 text-emerald-700' },
+  en_preparacion: { label: 'En preparación', color: 'bg-violet-50 text-violet-700' },
+  enviada:        { label: 'Enviada',        color: 'bg-indigo-50 text-indigo-700' },
+  entregada:      { label: 'Entregada',      color: 'bg-emerald-100 text-emerald-800' },
+  cancelada:      { label: 'Cancelada',      color: 'bg-red-50 text-red-700' },
 };
 
 function DashboardB2B() {
-  const [ordenes, setOrdenes]       = useState<any[]>([]);
-  const [socios, setSocios]         = useState(0);
-  const [ordenesHoy, setOrdenesHoy] = useState(0);
-  const [valorMes, setValorMes]     = useState(0);
-  const [perfiles, setPerfiles]     = useState(0);
-  const [loading, setLoading]       = useState(true);
+  const [ordenes, setOrdenes]           = useState<any[]>([]);
+  const [pendientes, setPendientes]     = useState<any[]>([]);
+  const [socios, setSocios]             = useState(0);
+  const [ordenesHoy, setOrdenesHoy]     = useState(0);
+  const [valorMes, setValorMes]         = useState(0);
+  const [perfiles, setPerfiles]         = useState(0);
+  const [loading, setLoading]           = useState(true);
+  const [aprobando, setAprobando]       = useState<string | null>(null);
+  const [rechazando, setRechazando]     = useState<string | null>(null);
+
+  const cargarOrdenes = async () => {
+    const [ordenesRes, drogsRes, perfilesRes] = await Promise.all([
+      axios.get('/api/admin/ordenes-compra?limit=8'),
+      axios.get('/api/admin/droguerias'),
+      axios.get('/api/admin/b2b/perfiles').catch(() => ({ data: [] })),
+    ]);
+    const ords = ordenesRes.data.ordenes || ordenesRes.data || [];
+    setOrdenes(ords);
+    setPendientes(ords.filter((o: any) => o.status === 'pago_pendiente'));
+    const hoy = new Date().toISOString().slice(0, 10);
+    setOrdenesHoy(ords.filter((o: any) => o.created_at?.slice(0, 10) === hoy).length);
+    setValorMes(ords.reduce((s: number, o: any) => s + (Number(o.total) || 0), 0));
+    const raw = Array.isArray(drogsRes.data) ? drogsRes.data : (drogsRes.data?.droguerias ?? []);
+    setSocios(raw.filter((d: any) => d.tipo === 'socio' && d.status === 'activo').length);
+    const pData = Array.isArray(perfilesRes.data) ? perfilesRes.data : (perfilesRes.data?.perfiles ?? []);
+    setPerfiles(pData.length);
+  };
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      try {
-        const [ordenesRes, drogsRes, perfilesRes] = await Promise.all([
-          axios.get('/api/admin/ordenes-compra?limit=8'),
-          axios.get('/api/admin/droguerias'),
-          axios.get('/api/admin/b2b/perfiles').catch(() => ({ data: [] })),
-        ]);
-        const ords = ordenesRes.data.ordenes || ordenesRes.data || [];
-        setOrdenes(ords);
-        const hoy = new Date().toISOString().slice(0, 10);
-        setOrdenesHoy(ords.filter((o: any) => o.created_at?.slice(0, 10) === hoy).length);
-        setValorMes(ords.reduce((s: number, o: any) => s + (Number(o.total_estimado) || 0), 0));
-        const raw = Array.isArray(drogsRes.data) ? drogsRes.data : (drogsRes.data?.droguerias ?? []);
-        setSocios(raw.filter((d: any) => d.tipo === 'socio' && d.status === 'activo').length);
-        const pData = Array.isArray(perfilesRes.data) ? perfilesRes.data : (perfilesRes.data?.perfiles ?? []);
-        setPerfiles(pData.length);
-      } catch { /* keep zeros */ } finally { setLoading(false); }
+      try { await cargarOrdenes(); } catch { /* keep zeros */ } finally { setLoading(false); }
     };
     load();
   }, []);
+
+  const aprobar = async (id: string) => {
+    setAprobando(id);
+    try {
+      await axios.post(`/api/admin/ordenes-compra/${id}/aprobar`);
+      await cargarOrdenes();
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error al aprobar');
+    } finally { setAprobando(null); }
+  };
+
+  const rechazar = async (id: string) => {
+    const motivo = prompt('Motivo de rechazo (opcional):') ?? '';
+    setRechazando(id);
+    try {
+      await axios.post(`/api/admin/ordenes-compra/${id}/rechazar`, { motivo });
+      await cargarOrdenes();
+    } catch (e: any) {
+      alert(e.response?.data?.error || 'Error al rechazar');
+    } finally { setRechazando(null); }
+  };
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center py-32 gap-3">
@@ -305,6 +334,75 @@ function DashboardB2B() {
         />
       </div>
 
+      {/* Pendientes de aprobación */}
+      {pendientes.length > 0 && (
+        <div className="card mb-6 border-l-4 border-amber-400">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="h-5 w-5 text-amber-500" />
+            <h2 className="section-title">Pendientes de aprobación ({pendientes.length})</h2>
+          </div>
+          <div className="flex flex-col gap-4">
+            {pendientes.map((o: any) => (
+              <div key={o.id} className="flex items-start gap-4 p-3 rounded-xl bg-amber-50 border border-amber-100">
+                {/* Comprobante thumbnail */}
+                <div className="shrink-0">
+                  {o.comprobante_url ? (
+                    <a href={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noreferrer">
+                      <img
+                        src={`/api/twilio-media?url=${encodeURIComponent(o.comprobante_url)}`}
+                        alt="Comprobante"
+                        className="w-20 h-20 object-cover rounded-lg border border-amber-200 hover:opacity-80 transition-opacity"
+                      />
+                    </a>
+                  ) : (
+                    <div className="w-20 h-20 rounded-lg bg-amber-100 border border-amber-200 flex items-center justify-center">
+                      <ImageIcon className="h-6 w-6 text-amber-400" />
+                    </div>
+                  )}
+                </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono font-bold text-indigo-600 text-xs">{o.numero_orden || o.id?.slice(0, 8)}</span>
+                    <span className="font-semibold text-gray-800 text-sm">{o.droguerias?.nombre ?? '—'}</span>
+                    {o.total != null && (
+                      <span className="text-sm font-bold text-gray-700">${Number(o.total).toLocaleString('es-CO')}</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {o.created_at ? new Date(o.created_at).toLocaleString('es-CO') : '—'}
+                  </p>
+                  {o.items && (
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">
+                      {Array.isArray(o.items) ? o.items.map((i: any) => `${i.nombre} ×${i.cantidad}`).join(', ') : '—'}
+                    </p>
+                  )}
+                </div>
+                {/* Actions */}
+                <div className="shrink-0 flex flex-col gap-2">
+                  <button
+                    onClick={() => aprobar(o.id)}
+                    disabled={aprobando === o.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+                  >
+                    {aprobando === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                    Aprobar
+                  </button>
+                  <button
+                    onClick={() => rechazar(o.id)}
+                    disabled={rechazando === o.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 disabled:opacity-60 transition-colors"
+                  >
+                    {rechazando === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                    Rechazar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-3 gap-6 mb-6">
         {/* Resumen estado órdenes */}
         <div className="card lg:col-span-2">
@@ -321,10 +419,10 @@ function DashboardB2B() {
                 return (
                   <tr key={o.id} className="table-row">
                     <td className="font-mono font-bold text-indigo-600 text-xs">{o.numero_orden || o.id?.slice(0, 8)}</td>
-                    <td className="font-semibold text-gray-900">{o.drogueria?.nombre ?? o.drogueria_nombre ?? '—'}</td>
+                    <td className="font-semibold text-gray-900">{o.droguerias?.nombre ?? '—'}</td>
                     <td><span className={`badge ${sc.color}`}>{sc.label}</span></td>
                     <td className="font-semibold text-gray-700">
-                      {o.total_estimado != null ? `$${Number(o.total_estimado).toLocaleString('es-CO')}` : '—'}
+                      {o.total != null ? `$${Number(o.total).toLocaleString('es-CO')}` : '—'}
                     </td>
                     <td className="text-gray-400">{o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : '—'}</td>
                   </tr>
