@@ -7,6 +7,14 @@ import {
 } from 'lucide-react';
 import AdminNavbar from '../../components/AdminNavbar';
 
+function mediaUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (url.includes('twilio.com') || url.includes('api.twilio.com')) {
+    return `/api/media/proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   cotizacion:     { label: 'Cotización',     color: 'bg-gray-100 text-gray-700' },
   confirmada:     { label: 'Confirmada',      color: 'bg-blue-100 text-blue-800' },
@@ -375,12 +383,12 @@ export default function OrdenesCompraB2B() {
                                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1">
                                   <ImageIcon className="h-3.5 w-3.5" /> Comprobante
                                 </p>
-                                {o.comprobante_url ? (
-                                  <a href={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noopener noreferrer">
+                                {mediaUrl(o.comprobante_url) ? (
+                                  <a href={mediaUrl(o.comprobante_url)!} target="_blank" rel="noopener noreferrer">
                                     <img
-                                      src={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`}
+                                      src={mediaUrl(o.comprobante_url)!}
                                       alt="Comprobante de pago"
-                                      className="w-full rounded-lg border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+                                      className="w-full rounded-xl border border-gray-200 object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
                                       style={{ maxHeight: 200 }}
                                     />
                                   </a>

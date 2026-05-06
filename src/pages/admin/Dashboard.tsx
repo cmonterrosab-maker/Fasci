@@ -12,6 +12,14 @@ import {
 import AdminNavbar from '../../components/AdminNavbar';
 import { useCanal } from '../../contexts/CanalContext';
 
+function mediaUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (url.includes('twilio.com') || url.includes('api.twilio.com')) {
+    return `/api/media/proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
 // ── Metric card component ──────────────────────────────────────────────────
 function MetricCard({
   icon, iconBg, label, value, sub,
@@ -346,10 +354,10 @@ function DashboardB2B() {
               <div key={o.id} className="flex items-start gap-4 p-3 rounded-xl bg-amber-50 border border-amber-100">
                 {/* Comprobante thumbnail */}
                 <div className="shrink-0">
-                  {o.comprobante_url ? (
-                    <a href={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`} target="_blank" rel="noreferrer">
+                  {mediaUrl(o.comprobante_url) ? (
+                    <a href={mediaUrl(o.comprobante_url)!} target="_blank" rel="noreferrer">
                       <img
-                        src={`/api/media/proxy?url=${encodeURIComponent(o.comprobante_url)}`}
+                        src={mediaUrl(o.comprobante_url)!}
                         alt="Comprobante"
                         className="w-20 h-20 object-cover rounded-lg border border-amber-200 hover:opacity-80 transition-opacity"
                       />
