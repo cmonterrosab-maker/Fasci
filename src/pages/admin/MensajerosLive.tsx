@@ -131,6 +131,13 @@ export default function MensajerosLive() {
     } catch {}
   };
 
+  const cambiarCanal = async (id: string, nuevoCanal: CanalMensajero) => {
+    try {
+      await axios.patch(`${API}/api/admin/mensajeros/${id}/canal`, { canal: nuevoCanal });
+      setTodos(prev => prev.map(m => m.id === id ? { ...m, canal: nuevoCanal } : m));
+    } catch {}
+  };
+
   return (
     <div className="min-h-screen bg-[#f4f6f9]">
       <AdminNavbar />
@@ -198,12 +205,11 @@ export default function MensajerosLive() {
           <MapaMensajeros mensajeros={mensajeros} />
         </div>
 
-        {/* Lista */}
+        {/* Lista — muestra todos para poder reasignar canal */}
         <div className="card p-0 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-50">
-            <span className="section-title">
-              {isB2B ? 'Mensajeros B2B y compartidos' : 'Mensajeros B2C y compartidos'}
-            </span>
+          <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between">
+            <span className="section-title">Todos los mensajeros</span>
+            <span className="text-xs text-gray-400">Cambia el canal con el selector de cada fila</span>
           </div>
 
           {loading ? (
@@ -211,10 +217,10 @@ export default function MensajerosLive() {
               <Loader2 className={`w-7 h-7 animate-spin ${accent}`} />
               <span className="text-sm text-gray-400">Cargando mensajeros…</span>
             </div>
-          ) : mensajeros.length === 0 ? (
+          ) : todos.length === 0 ? (
             <div className="py-16 text-center">
               <Bike className="w-10 h-10 mx-auto mb-3 text-gray-200" />
-              <p className="text-sm text-gray-400">No hay mensajeros registrados para este canal.</p>
+              <p className="text-sm text-gray-400">No hay mensajeros registrados.</p>
               <button onClick={() => setShowModal(true)}
                 className={`mt-4 text-sm font-semibold ${accent} hover:underline`}>
                 + Registrar el primero
@@ -222,7 +228,7 @@ export default function MensajerosLive() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {mensajeros.map(m => (
+              {todos.map(m => (
                 <div key={m.id}
                   className="px-5 py-3.5 hover:bg-gray-50/70 cursor-pointer transition-colors"
                   onClick={() => setSel(m)}>
@@ -236,9 +242,11 @@ export default function MensajerosLive() {
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-sm text-gray-900 truncate">{m.nombre}</span>
                         <span className="text-xs text-gray-400">{m.vehiculo}{m.placa ? ` · ${m.placa}` : ''}</span>
-                        {m.canal === 'ambos' && (
-                          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">Ambos</span>
-                        )}
+                        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded ${
+                          m.canal === 'ambos' ? 'bg-violet-100 text-violet-600' :
+                          m.canal === 'b2b'   ? 'bg-indigo-100 text-indigo-600' :
+                                               'bg-emerald-100 text-emerald-600'
+                        }`}>{m.canal === 'ambos' ? 'Ambos' : m.canal.toUpperCase()}</span>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-400">
                         <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{m.telefono}</span>
@@ -277,6 +285,18 @@ export default function MensajerosLive() {
                     ) : (
                       <span className="text-xs text-gray-300 flex-shrink-0">Sin GPS</span>
                     )}
+
+                    {/* Selector canal */}
+                    <select
+                      value={m.canal}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => cambiarCanal(m.id, e.target.value as CanalMensajero)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-600 flex-shrink-0 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                    >
+                      <option value="b2c">B2C</option>
+                      <option value="b2b">B2B</option>
+                      <option value="ambos">Ambos</option>
+                    </select>
 
                     {/* Toggle disponible */}
                     <button

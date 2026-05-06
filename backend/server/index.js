@@ -606,6 +606,18 @@ app.put('/api/admin/mensajeros/:id/disponible', async (req, res) => {
   }
 });
 
+app.patch('/api/admin/mensajeros/:id/canal', async (req, res) => {
+  try {
+    const { canal } = req.body;
+    if (!['b2c', 'b2b', 'ambos'].includes(canal)) return res.status(400).json({ error: 'Canal inválido' });
+    const { error } = await supabase.from('mensajeros').update({ canal }).eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // API DROGUERÍA (autenticada)
 // ─────────────────────────────────────────────────────────────────────────────
