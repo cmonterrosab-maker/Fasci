@@ -309,7 +309,7 @@ async function getMensajeroParaSeguimiento(mensajeroId) {
  * Busca por número de pedido/orden específico, o por teléfono del cliente.
  */
 async function manejarSeguimiento(telefono, mensaje) {
-  const txt   = (mensaje || '').trim().toUpperCase();
+  const txt   = (mensaje || '').trim().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const upper = txt;
 
   // ── Número de orden B2B específico: DV-OC-XXXX ───────────────────────────
@@ -1065,7 +1065,8 @@ const FRASES_HABITUAL = [
 
 async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
   const txt   = (mensaje || '').trim();
-  const upper = txt.toUpperCase();
+  // Normalizar acentos para que "Repetír", "Sí", "Entrégado" etc. funcionen igual
+  const upper = txt.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const txtNorm = txt.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const sesion = obtenerSesion(telefono);
 
@@ -1503,7 +1504,7 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
  * @returns {Promise<string>}
  */
 async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono = null) {
-  const txt = (mensaje || '').trim().toUpperCase();
+  const txt = (mensaje || '').trim().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const telefonoSesion = telefono || mensajero.telefono;
   const sesion = obtenerSesion(telefonoSesion);
 
