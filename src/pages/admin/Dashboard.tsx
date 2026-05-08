@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Store, ShoppingBag, Pill, TrendingUp, MapPin,
   Package, Brain, ArrowRight, Loader2, CheckCircle, XCircle, Clock, ImageIcon,
-  Truck, MapPinned,
+  Truck, MapPinned, AlertTriangle, Bell, X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -19,6 +19,76 @@ function mediaUrl(url: string | null): string | null {
     return `/api/media/proxy?url=${encodeURIComponent(url)}`;
   }
   return url;
+}
+
+// ── Panel de alertas (compartido B2C y B2B) ───────────────────────────────
+const ALERTA_CONF: Record<string, { color: string; bg: string; border: string; icono: React.ReactNode }> = {
+  critical: { color: 'text-red-700',    bg: 'bg-red-50',    border: 'border-red-200',    icono: <AlertTriangle className="h-4 w-4 text-red-500" /> },
+  warning:  { color: 'text-amber-700',  bg: 'bg-amber-50',  border: 'border-amber-200',  icono: <Bell className="h-4 w-4 text-amber-500" /> },
+  info:     { color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200',   icono: <Bell className="h-4 w-4 text-blue-400" /> },
+};
+
+function PanelAlertas() {
+  const [alertas, setAlertas] = useState<any[]>([]);
+  const [resolviendo, setResolviendo] = useState<string | null>(null);
+
+  const cargar = async () => {
+    try {
+      const r = await axios.get('/api/admin/alertas?limit=10');
+      setAlertas(r.data.alertas || []);
+    } catch { /* silencioso */ }
+  };
+
+  useEffect(() => {
+    cargar();
+    const iv = setInterval(cargar, 60_000); // refresca cada 1 min
+    return () => clearInterval(iv);
+  }, []);
+
+  const resolver = async (id: string) => {
+    setResolviendo(id);
+    try {
+      await axios.post(`/api/admin/alertas/${id}/resolver`);
+      setAlertas(prev => prev.filter(a => a.id !== id));
+    } catch { /* silencioso */ } finally { setResolviendo(null); }
+  };
+
+  if (alertas.length === 0) return null;
+
+  return (
+    <div className="card mb-6 border-l-4 border-red-400">
+      <div className="flex items-center gap-2 mb-4">
+        <AlertTriangle className="h-5 w-5 text-red-500" />
+        <h2 className="section-title">Alertas activas ({alertas.length})</h2>
+      </div>
+      <div className="flex flex-col gap-2">
+        {alertas.map((a: any) => {
+          const conf = ALERTA_CONF[a.severidad] ?? ALERTA_CONF.warning;
+          const hace = Math.round((Date.now() - new Date(a.created_at).getTime()) / 60000);
+          const tiempoStr = hace < 60 ? `hace ${hace} min` : `hace ${Math.round(hace / 60)}h`;
+          return (
+            <div key={a.id} className={`flex items-start gap-3 p-3 rounded-xl border ${conf.bg} ${conf.border}`}>
+              <div className="shrink-0 mt-0.5">{conf.icono}</div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${conf.color}`}>{a.mensaje}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{tiempoStr}</p>
+              </div>
+              <button
+                onClick={() => resolver(a.id)}
+                disabled={resolviendo === a.id}
+                className="shrink-0 p-1 rounded-lg hover:bg-white/60 transition-colors"
+                title="Marcar como resuelta"
+              >
+                {resolviendo === a.id
+                  ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                  : <X className="h-4 w-4 text-gray-400 hover:text-gray-600" />}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ── Metric card component ──────────────────────────────────────────────────
@@ -106,6 +176,7 @@ function DashboardB2C() {
 
   return (
     <div className="animate-in">
+      <PanelAlertas />
       {/* Header */}
       <div className="page-header">
         <div className="flex items-center gap-3">
@@ -303,6 +374,7 @@ function DashboardB2B() {
 
   return (
     <div className="animate-in">
+      <PanelAlertas />
       {/* Header */}
       <div className="page-header">
         <div className="flex items-center gap-3">

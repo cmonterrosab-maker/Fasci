@@ -25,6 +25,7 @@ const CacheService = require('../services/cache-service');
 const MetricasService = require('../services/metricas-service');
 const CalificacionService = require('../services/calificacion-service');
 const LealtadService = require('../services/lealtad-service');
+const AlertasService = require('../services/alertas-service');
 
 // ─── Inicialización ───────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ const cacheService = new CacheService();
 const metricasService = new MetricasService(supabase);
 const calificacionService = new CalificacionService(supabase);
 const lealtadService = new LealtadService(supabase);
+const alertasService = new AlertasService(supabase);
 
 // ─── Trust proxy (Render, Railway, Heroku usan reverse proxy) ────────────────
 // Necesario para que express-rate-limit lea X-Forwarded-For correctamente.
@@ -1844,7 +1846,39 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
-console.log('[Server] Cron de calificaciones programado (cada 5 min)');
+// Cada 5 minutos: detectar retrasos y generar alertas
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    await alertasService.ejecutarChecks();
+  } catch (err) {
+    console.error('[Cron] Error ejecutando checks de alertas:', err.message);
+  }
+});
+
+console.log('[Server] Cron de calificaciones y alertas programado (cada 5 min)');
+
+/** GET /api/admin/alertas — Alertas activas */
+app.get('/api/admin/alertas', async (req, res) => {
+  try {
+    const data = await alertasService.getAlertasActivas(parseInt(req.query.limit) || 20);
+    res.json({ alertas: data, total: data.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/admin/alertas/:id/resolver — Resolver alerta manualmente */
+app.post('/api/admin/alertas/:id/resolver', async (req, res) => {
+  try {
+    await supabase
+      .from('alertas')
+      .update({ resuelta: true, resuelta_at: new Date().toISOString() })
+      .eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ARRANQUE DEL SERVIDOR
