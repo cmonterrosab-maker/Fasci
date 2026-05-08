@@ -82,6 +82,35 @@ async function withRetry(fn, maxRetries = 3, baseDelayMs = 500) {
 // ─── Funciones principales ────────────────────────────────────────────────────
 
 /**
+ * Muestra la burbuja "escribiendo..." antes de enviar la respuesta del bot.
+ * Intenta el PersistentAction typing_on de Twilio; falla silenciosamente si
+ * la cuenta no lo soporta. El delay proporcional siempre se aplica.
+ *
+ * @param {string} to      - Número destino
+ * @param {string} msgBody - Texto que se va a enviar (para calcular el delay)
+ */
+async function sendTypingIndicator(to, msgBody = '') {
+  const toFormatted = formatWhatsAppNumber(to);
+  // 600 ms para mensajes cortos, hasta 1500 ms para mensajes largos (~150 chars)
+  const delayMs = Math.min(1500, Math.max(600, Math.round(msgBody.length * 10)));
+
+  // Intento: Twilio admite PersistentAction=typing_on en algunas cuentas WhatsApp Business.
+  // Si la cuenta o la versión del API no lo soportan, el error se ignora y
+  // el mensaje real igual llega después del delay.
+  try {
+    await getClient().messages.create({
+      from: fromNumber,
+      to: toFormatted,
+      persistentAction: ['typing_on'],
+    });
+  } catch {
+    // Silent fail — la cuenta no soporta typing indicators
+  }
+
+  await sleep(delayMs);
+}
+
+/**
  * Envía un mensaje de texto simple por WhatsApp.
  * @param {string} to - Número destino (ej: "+573001234567" o "whatsapp:+573001234567")
  * @param {string} body - Texto del mensaje
@@ -189,5 +218,6 @@ module.exports = {
   sendWhatsAppTemplate,
   sendWhatsAppList,
   sendWhatsAppButtons,
+  sendTypingIndicator,
   formatWhatsAppNumber,
 };

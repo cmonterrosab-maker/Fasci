@@ -1201,9 +1201,18 @@ async function manejarFlujoB2B(drogueria, telefono, mensaje, contexto) {
         subtotal: Number(i.cantidad) * Number(i.precio_mayorista),
       }));
       sesion.b2b.drogueria_id = drogueria.id;
+
+      // Calcular totales igual que en el flujo CARRITO → NO
+      const subtotalRepetir = sesion.carrito.reduce((s, i) => s + i.subtotal, 0);
+      const descInfoRepetir = b2bService.calcularDescuento(subtotalRepetir);
+      sesion.b2b.descuento = descInfoRepetir;
+      sesion.b2b.subtotal  = subtotalRepetir;
+      sesion.b2b.total     = descInfoRepetir.total || subtotalRepetir;
+
       sesion.estado = ESTADOS.B2B_COTIZACION;
       guardarSesion(telefono, sesion);
-      return b2bService.generarTextoCotizacion(sesion.carrito, drogueria);
+      const textoCotRepetir = b2bService.generarTextoCotizacion(sesion.carrito, drogueria);
+      return textoCotRepetir + '\n\n¿Confirmas esta orden de compra?\nResponde *SI* para continuar o *NO* para cancelar.';
     }
     // NUEVO o cualquier otra cosa → flujo normal
     sesion.estado = ESTADOS.B2B_BUSCANDO;
@@ -1506,10 +1515,14 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
       contexto.location.longitude
     );
     if (mensajero.pedido_actual_id) {
-      // Look up numero_pedido for display
+      let numPedido = null;
       const { data: pa } = await supabase.from('pedidos').select('numero_pedido').eq('id', mensajero.pedido_actual_id).maybeSingle();
-      const numPedido = pa?.numero_pedido || mensajero.pedido_actual_id;
-      return `📍 *Ubicación actualizada*\nTu posición fue registrada. Los clientes pueden verla en tiempo real.\n\nPara confirmar la entrega cuando llegues:\n*ENTREGADO ${numPedido}*`;
+      numPedido = pa?.numero_pedido || null;
+      if (!numPedido) {
+        const { data: oc } = await supabase.from('ordenes_compra').select('numero_orden').eq('id', mensajero.pedido_actual_id).maybeSingle();
+        numPedido = oc?.numero_orden || mensajero.pedido_actual_id;
+      }
+      return `📍 *Ubicación actualizada*\nTu posición fue registrada. Los clientes pueden verla en tiempo real.\n\nCuando llegues al destino envía:\n*LLEGUE*\n\nPara confirmar la entrega:\n*ENTREGADO ${numPedido}*`;
     }
     return `📍 Ubicación registrada correctamente ✅`;
   }
@@ -1551,18 +1564,27 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
       return `❌ No pude confirmar *${numeroPedido}*.\n${resultado.error || 'Verifica el número o contacta al administrador.'}`;
     }
 
-    // ── Notificar al cliente que su pedido llegó ──────────────────────────────
+    // ── Notificar al cliente/compradora que su pedido llegó ──────────────────
     const pedido = resultado.pedido;
     if (pedido?.cliente_telefono) {
       const horaEntrega = new Date(ahoraEntrega).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
-      const msgCliente = [
-        `✅ *¡Tu pedido llegó!*`,
-        ``,
-        `📦 *${numeroPedido}* fue entregado a las *${horaEntrega}* por *${mensajero.nombre}*.`,
-        ``,
-        `¿Todo llegó bien? Califica tu experiencia del 1 al 5 ⭐`,
-        `_(1 = muy malo · 5 = excelente)_`,
-      ].join('\n');
+      // B2B: mensaje sin solicitud de calificación (el detector de rating solo opera en pedidos B2C)
+      const msgCliente = resultado.esB2B
+        ? [
+            `✅ *¡Tu orden llegó!*`,
+            ``,
+            `📦 *${numeroPedido}* fue entregada a las *${horaEntrega}* por *${mensajero.nombre}*.`,
+            ``,
+            `Gracias por confiar en Droguería Virtual. ¡Hasta pronto! 🏪`,
+          ].join('\n')
+        : [
+            `✅ *¡Tu pedido llegó!*`,
+            ``,
+            `📦 *${numeroPedido}* fue entregado a las *${horaEntrega}* por *${mensajero.nombre}*.`,
+            ``,
+            `¿Todo llegó bien? Califica tu experiencia del 1 al 5 ⭐`,
+            `_(1 = muy malo · 5 = excelente)_`,
+          ].join('\n');
 
       sendWhatsAppMessage(pedido.cliente_telefono, msgCliente)
         .catch(err => console.error(`[Bot] No se pudo notificar al cliente (${pedido.cliente_telefono}):`, err.message));
@@ -1577,18 +1599,95 @@ async function manejarFlujoMensajero(mensajero, mensaje, contexto = {}, telefono
     );
   }
 
-  // ── ENTREGADO DV-XXXX (o solo ENTREGADO con pedido activo) ────────────────
-  const matchEntrega = txt.match(/^ENTREGADO\s+(DV-[\d-]+)/);
-  let numeroPedidoEntrega = matchEntrega ? matchEntrega[1] : null;
+  // ── LLEGUE: mensajero avisa que llegó al destino ──────────────────────────
+  if (txt === 'LLEGUE' || txt === 'LLEGUÉ') {
+    if (!mensajero.pedido_actual_id) {
+      return `No tienes ningún pedido activo en este momento.`;
+    }
 
-  // Sin número de pedido → buscar el pedido activo del mensajero
+    // Resolver número de orden (B2C o B2B)
+    let numOrdenLlegue = null;
+    let telefonoDestinoLlegue = null;
+    let nombreDestinoLlegue = null;
+    let esB2BLlegue = false;
+
+    const { data: pedLlegue } = await supabase
+      .from('pedidos')
+      .select('numero_pedido, cliente_telefono, cliente_nombre')
+      .eq('id', mensajero.pedido_actual_id)
+      .maybeSingle();
+
+    if (pedLlegue) {
+      numOrdenLlegue         = pedLlegue.numero_pedido;
+      telefonoDestinoLlegue  = pedLlegue.cliente_telefono;
+      nombreDestinoLlegue    = pedLlegue.cliente_nombre;
+    } else {
+      const { data: ocLlegue } = await supabase
+        .from('ordenes_compra')
+        .select('numero_orden, compradora_telefono, compradora_nombre')
+        .eq('id', mensajero.pedido_actual_id)
+        .maybeSingle();
+      if (ocLlegue) {
+        numOrdenLlegue         = ocLlegue.numero_orden;
+        telefonoDestinoLlegue  = ocLlegue.compradora_telefono;
+        nombreDestinoLlegue    = ocLlegue.compradora_nombre;
+        esB2BLlegue            = true;
+      }
+    }
+
+    if (!numOrdenLlegue) {
+      return `No pude identificar tu pedido activo. Contacta al administrador.`;
+    }
+
+    // Guardar timestamp de llegada en DB (visible en el panel de admin)
+    const llegadaAt = new Date().toISOString();
+    supabase
+      .from(esB2BLlegue ? 'ordenes_compra' : 'pedidos')
+      .update({ llegada_destino_at: llegadaAt })
+      .eq('id', mensajero.pedido_actual_id)
+      .then(() => {})
+      .catch(err => console.error('[Bot] Error guardando llegada_destino_at:', err.message));
+
+    // Notificar al cliente/droguería
+    if (telefonoDestinoLlegue) {
+      const msgDestino = esB2BLlegue
+        ? `🔔 *¡Tu domiciliario llegó!*\n\n*${mensajero.nombre}* está en tu establecimiento con la orden *${numOrdenLlegue}*.\n\nPor favor recibe el pedido. ✅`
+        : `🔔 *¡Tu domiciliario llegó!*\n\n*${mensajero.nombre}* está en la puerta con tu pedido *${numOrdenLlegue}*.\n\nPor favor recíbelo. ✅`;
+      sendWhatsAppMessage(telefonoDestinoLlegue, msgDestino)
+        .catch(err => console.error(`[Bot] Error notificando llegada a ${telefonoDestinoLlegue}:`, err.message));
+    }
+
+    return (
+      `✅ *¡Listo ${mensajero.nombre}!*\n\n` +
+      `Le avisé a *${nombreDestinoLlegue || 'el cliente'}* que ya llegaste.\n\n` +
+      `Cuando entregues el pedido, envía la foto:\n*ENTREGADO ${numOrdenLlegue}*`
+    );
+  }
+
+  // ── ENTREGADO DV-XXXX (o solo ENTREGADO con pedido activo) ────────────────
+  // DV-[A-Za-z0-9-]+ cubre tanto B2C (DV-2026-0001) como B2B (DV-OC-2026-0002)
+  const matchEntrega = txt.match(/^ENTREGADO\s+(DV-[A-Za-z0-9-]+)/i);
+  let numeroPedidoEntrega = matchEntrega ? matchEntrega[1].toUpperCase() : null;
+
+  // Sin número de pedido → buscar el pedido/orden activo del mensajero
   if (!numeroPedidoEntrega && txt === 'ENTREGADO' && mensajero.pedido_actual_id) {
+    // B2C: buscar en pedidos
     const { data: pa } = await supabase
       .from('pedidos')
       .select('numero_pedido')
       .eq('id', mensajero.pedido_actual_id)
       .maybeSingle();
     numeroPedidoEntrega = pa?.numero_pedido || null;
+
+    // B2B: si no estaba en pedidos, buscar en ordenes_compra
+    if (!numeroPedidoEntrega) {
+      const { data: oc } = await supabase
+        .from('ordenes_compra')
+        .select('numero_orden')
+        .eq('id', mensajero.pedido_actual_id)
+        .maybeSingle();
+      numeroPedidoEntrega = oc?.numero_orden || null;
+    }
   }
 
   if (numeroPedidoEntrega) {

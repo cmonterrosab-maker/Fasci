@@ -406,53 +406,87 @@ class MensajeroService {
       }
 
       const mensajero = mensajeros[0];
+      const numeroNorm = numeroPedido.toUpperCase().trim();
 
-      // Buscar el pedido por número
-      const { data: pedido, error: errPedido } = await this.supabase
+      // ── B2C: buscar en pedidos ────────────────────────────────────────────────
+      const { data: pedido } = await this.supabase
         .from('pedidos')
-        .select('id, numero_pedido, status, mensajero_id')
-        .eq('numero_pedido', numeroPedido.toUpperCase().trim())
-        .single();
+        .select('id, numero_pedido, status, mensajero_id, cliente_telefono')
+        .eq('numero_pedido', numeroNorm)
+        .maybeSingle();
 
-      if (errPedido) throw errPedido;
-      if (!pedido) {
-        return { success: false, error: `Pedido ${numeroPedido} no encontrado` };
+      if (pedido) {
+        if (pedido.status === 'entregado') {
+          return { success: false, error: `El pedido ${numeroNorm} ya fue marcado como entregado.` };
+        }
+        if (pedido.mensajero_id && pedido.mensajero_id !== mensajero.id) {
+          console.warn(`[MensajeroService] Mensajero ${mensajero.nombre} intentó confirmar pedido que no le pertenece.`);
+          return { success: false, error: 'Este pedido no está asignado a tu cuenta.' };
+        }
+        const updateData = {
+          status: 'entregado',
+          entregado_at: new Date().toISOString(),
+          calificacion_solicitada_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        if (fotoUrl)  updateData.foto_entrega_url  = fotoUrl;
+        if (fotoMeta) updateData.foto_entrega_meta  = fotoMeta;
+
+        const { data: pedidoActualizado, error: errUpdate } = await this.supabase
+          .from('pedidos')
+          .update(updateData)
+          .eq('id', pedido.id)
+          .select()
+          .single();
+
+        if (errUpdate) throw errUpdate;
+        await this.liberarMensajero(mensajero.id);
+        console.log(`[MensajeroService] Entrega B2C confirmada. Pedido: ${numeroNorm}, Mensajero: ${mensajero.nombre}`);
+        return { success: true, pedido: pedidoActualizado };
       }
 
-      if (pedido.status === 'entregado') {
-        return { success: false, error: `El pedido ${numeroPedido} ya fue marcado como entregado.` };
+      // ── B2B: buscar en ordenes_compra ─────────────────────────────────────────
+      const { data: orden } = await this.supabase
+        .from('ordenes_compra')
+        .select('id, numero_orden, status, mensajero_id, compradora_telefono')
+        .eq('numero_orden', numeroNorm)
+        .maybeSingle();
+
+      if (orden) {
+        if (orden.status === 'entregada') {
+          return { success: false, error: `La orden ${numeroNorm} ya fue marcada como entregada.` };
+        }
+        if (orden.mensajero_id && orden.mensajero_id !== mensajero.id) {
+          console.warn(`[MensajeroService] Mensajero ${mensajero.nombre} intentó confirmar orden B2B que no le pertenece.`);
+          return { success: false, error: 'Esta orden no está asignada a tu cuenta.' };
+        }
+        const updateDataB2B = {
+          status: 'entregada',
+          entregada_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        if (fotoUrl)  updateDataB2B.foto_entrega_url  = fotoUrl;
+        if (fotoMeta) updateDataB2B.foto_entrega_meta  = fotoMeta;
+
+        const { data: ordenActualizada, error: errUpdateB2B } = await this.supabase
+          .from('ordenes_compra')
+          .update(updateDataB2B)
+          .eq('id', orden.id)
+          .select()
+          .single();
+
+        if (errUpdateB2B) throw errUpdateB2B;
+        await this.liberarMensajero(mensajero.id);
+        console.log(`[MensajeroService] Entrega B2B confirmada. Orden: ${numeroNorm}, Mensajero: ${mensajero.nombre}`);
+        // Devolver en formato compatible: cliente_telefono apunta a compradora
+        return {
+          success: true,
+          pedido: { ...ordenActualizada, cliente_telefono: ordenActualizada.compradora_telefono },
+          esB2B: true,
+        };
       }
 
-      // Verificar que el mensajero es el asignado a ese pedido
-      if (pedido.mensajero_id && pedido.mensajero_id !== mensajero.id) {
-        console.warn(`[MensajeroService] Mensajero ${mensajero.nombre} intentó confirmar pedido que no le pertenece.`);
-        return { success: false, error: 'Este pedido no está asignado a tu cuenta.' };
-      }
-
-      // Actualizar pedido a 'entregado'
-      const updateData = {
-        status: 'entregado',
-        entregado_at: new Date().toISOString(),
-        calificacion_solicitada_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      if (fotoUrl)  updateData.foto_entrega_url  = fotoUrl;
-      if (fotoMeta) updateData.foto_entrega_meta  = fotoMeta;
-
-      const { data: pedidoActualizado, error: errUpdate } = await this.supabase
-        .from('pedidos')
-        .update(updateData)
-        .eq('id', pedido.id)
-        .select()
-        .single();
-
-      if (errUpdate) throw errUpdate;
-
-      // Liberar mensajero
-      await this.liberarMensajero(mensajero.id);
-
-      console.log(`[MensajeroService] Entrega confirmada. Pedido: ${numeroPedido}, Mensajero: ${mensajero.nombre}`);
-      return { success: true, pedido: pedidoActualizado };
+      return { success: false, error: `Pedido/Orden ${numeroNorm} no encontrado` };
     } catch (err) {
       console.error('[MensajeroService] confirmarEntrega error:', err.message);
       return { success: false, error: err.message };

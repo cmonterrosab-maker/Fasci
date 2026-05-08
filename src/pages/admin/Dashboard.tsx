@@ -3,6 +3,7 @@ import axios from 'axios';
 import {
   Store, ShoppingBag, Pill, TrendingUp, MapPin,
   Package, Brain, ArrowRight, Loader2, CheckCircle, XCircle, Clock, ImageIcon,
+  Truck, MapPinned,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
@@ -236,6 +237,7 @@ const ORDEN_STATUS: Record<string, { label: string; color: string }> = {
 function DashboardB2B() {
   const [ordenes, setOrdenes]           = useState<any[]>([]);
   const [pendientes, setPendientes]     = useState<any[]>([]);
+  const [enTransito, setEnTransito]     = useState<any[]>([]);
   const [socios, setSocios]             = useState(0);
   const [ordenesHoy, setOrdenesHoy]     = useState(0);
   const [valorMes, setValorMes]         = useState(0);
@@ -253,6 +255,7 @@ function DashboardB2B() {
     const ords = ordenesRes.data.ordenes || ordenesRes.data || [];
     setOrdenes(ords);
     setPendientes(ords.filter((o: any) => o.status === 'pago_pendiente'));
+    setEnTransito(ords.filter((o: any) => o.status === 'enviada'));
     const hoy = new Date().toISOString().slice(0, 10);
     setOrdenesHoy(ords.filter((o: any) => o.created_at?.slice(0, 10) === hoy).length);
     setValorMes(ords.reduce((s: number, o: any) => s + (Number(o.total) || 0), 0));
@@ -411,13 +414,58 @@ function DashboardB2B() {
         </div>
       )}
 
+      {/* En tránsito */}
+      {enTransito.length > 0 && (
+        <div className="card mb-6 border-l-4 border-indigo-400">
+          <div className="flex items-center gap-2 mb-4">
+            <Truck className="h-5 w-5 text-indigo-500" />
+            <h2 className="section-title">En tránsito ({enTransito.length})</h2>
+          </div>
+          <div className="flex flex-col gap-3">
+            {enTransito.map((o: any) => {
+              const yaLlego = !!o.llegada_destino_at;
+              return (
+                <div key={o.id} className={`flex items-center gap-4 p-3 rounded-xl border ${yaLlego ? 'bg-emerald-50 border-emerald-100' : 'bg-indigo-50 border-indigo-100'}`}>
+                  <div className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${yaLlego ? 'bg-emerald-100' : 'bg-indigo-100'}`}>
+                    {yaLlego
+                      ? <MapPinned className="h-4 w-4 text-emerald-600" />
+                      : <Truck className="h-4 w-4 text-indigo-500" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-indigo-600 text-xs">{o.numero_orden}</span>
+                      <span className="font-semibold text-gray-800 text-sm">{o.droguerias?.nombre ?? '—'}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {o.mensajeros?.nombre
+                        ? <span>🛵 <span className="font-medium">{o.mensajeros.nombre}</span></span>
+                        : <span className="text-gray-400">Sin mensajero asignado</span>}
+                      {yaLlego && (
+                        <span className="ml-2 text-emerald-600 font-medium">
+                          · Llegó {new Date(o.llegada_destino_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <span className={`badge text-xs ${yaLlego ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                      {yaLlego ? 'En puerta' : 'En camino'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-3 gap-6 mb-6">
         {/* Resumen estado órdenes */}
         <div className="card lg:col-span-2">
           <h2 className="section-title mb-5">Últimas órdenes de compra</h2>
           <table className="w-full">
             <thead><tr className="table-head">
-              <th>Orden</th><th>Droguería</th><th>Estado</th><th>Total</th><th>Fecha</th>
+              <th>Orden</th><th>Droguería</th><th>Mensajero</th><th>Estado</th><th>Total</th>
             </tr></thead>
             <tbody>
               {ordenes.length === 0 ? (
@@ -428,11 +476,11 @@ function DashboardB2B() {
                   <tr key={o.id} className="table-row">
                     <td className="font-mono font-bold text-indigo-600 text-xs">{o.numero_orden || o.id?.slice(0, 8)}</td>
                     <td className="font-semibold text-gray-900">{o.droguerias?.nombre ?? '—'}</td>
+                    <td className="text-gray-500 text-sm">{o.mensajeros?.nombre ?? <span className="text-gray-300">—</span>}</td>
                     <td><span className={`badge ${sc.color}`}>{sc.label}</span></td>
                     <td className="font-semibold text-gray-700">
                       {o.total != null ? `$${Number(o.total).toLocaleString('es-CO')}` : '—'}
                     </td>
-                    <td className="text-gray-400">{o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : '—'}</td>
                   </tr>
                 );
               })}

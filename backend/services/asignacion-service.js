@@ -208,6 +208,9 @@ class AsignacionService {
         clienteNombre, clienteTel, clienteLat, clienteLng, etaMinutos,
       });
 
+      // 7. Notificar al cliente que su mensajero está en camino
+      await this._notificarClienteEnCaminoB2C(pedidoId, elegido, etaMinutos);
+
       return { success: true, mensajero: elegido, etaMinutos, etaTexto, modo, alerta_admin: alerta };
 
     } catch (err) {
@@ -305,6 +308,9 @@ class AsignacionService {
       // 5. Notificar al mensajero
       await this._notificarMensajeroNormal(elegido, ordenId, { compradoraNombre, compradoraTel, compradoraLat, compradoraLng });
 
+      // 6. Notificar a la droguería compradora que su mensajero está en camino
+      await this._notificarCompradoreEnCaminoB2B(ordenId, elegido);
+
       console.log(`[Asignacion] B2B asignado: ${elegido.nombre} → orden ${ordenId}`);
       return { success: true, mensajero: elegido, etaTexto };
 
@@ -379,7 +385,8 @@ class AsignacionService {
       ``,
       `💰 Total: $${Number(pedido?.total || 0).toLocaleString('es-CO')} *(YA PAGADO — no cobrar)*`,
       ``,
-      `✅ Para confirmar entrega: *ENTREGADO ${numeroPedido}*`,
+      `📍 Cuando llegues al destino avisa: *LLEGUE*`,
+      `✅ Para confirmar entrega envía la foto: *ENTREGADO ${numeroPedido}*`,
       `📍 Comparte tu ubicación en vivo para que el cliente te rastree.`,
     ].filter(l => l !== null && l !== undefined).join('\n');
 
@@ -423,11 +430,61 @@ class AsignacionService {
       ``,
       `💰 Total: $${Number(orden?.total || 0).toLocaleString('es-CO')} *(PAGADO)*`,
       ``,
-      `✅ Confirmar entrega: *ENTREGADO ${numeroOrden}*`,
+      `📍 Cuando llegues avisa: *LLEGUE*`,
+      `✅ Confirmar entrega envía la foto: *ENTREGADO ${numeroOrden}*`,
     ].join('\n');
 
     await sendWhatsAppMessage(mensajero.telefono, msg).catch(err =>
       console.error('[Asignacion] Error notificando mensajero B2B:', err.message)
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // NOTIFICACIONES AL CLIENTE / COMPRADORA
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async _notificarClienteEnCaminoB2C(pedidoId, mensajero, etaMinutos) {
+    const { data: pedido } = await this.supabase
+      .from('pedidos')
+      .select('numero_pedido, cliente_telefono, cliente_nombre')
+      .eq('id', pedidoId)
+      .maybeSingle();
+    if (!pedido?.cliente_telefono) return;
+
+    const eta = etaMinutos ? `⏱️ Tiempo estimado: *${etaMinutos} min*\n\n` : '';
+    const msg = [
+      `🛵 *¡Tu domiciliario está en camino!*`,
+      ``,
+      `*${mensajero.nombre}* ya recogió tu pedido *${pedido.numero_pedido}* y va hacia ti.`,
+      ``,
+      `${eta}Cuando llegue te avisaremos. 📦`,
+    ].join('\n');
+
+    sendWhatsAppMessage(pedido.cliente_telefono, msg).catch(err =>
+      console.error('[Asignacion] Error notificando cliente en camino:', err.message)
+    );
+  }
+
+  async _notificarCompradoreEnCaminoB2B(ordenId, mensajero) {
+    const { data: orden } = await this.supabase
+      .from('ordenes_compra')
+      .select('numero_orden, compradora_telefono, compradora_nombre')
+      .eq('id', ordenId)
+      .maybeSingle();
+    if (!orden?.compradora_telefono) return;
+
+    const msg = [
+      `📦 *Tu orden mayorista está en camino*`,
+      ``,
+      `El domiciliario *${mensajero.nombre}* ya tiene tu orden *${orden.numero_orden}* y se dirige a tu establecimiento.`,
+      ``,
+      `⏱️ Entrega estimada: *2-4 horas*`,
+      ``,
+      `Te avisaremos cuando llegue. ✅`,
+    ].join('\n');
+
+    sendWhatsAppMessage(orden.compradora_telefono, msg).catch(err =>
+      console.error('[Asignacion] Error notificando compradora en camino:', err.message)
     );
   }
 

@@ -246,7 +246,7 @@ export default function MensajerosLive() {
                           m.canal === 'ambos' ? 'bg-violet-100 text-violet-600' :
                           m.canal === 'b2b'   ? 'bg-indigo-100 text-indigo-600' :
                                                'bg-emerald-100 text-emerald-600'
-                        }`}>{m.canal === 'ambos' ? 'Ambos' : m.canal.toUpperCase()}</span>
+                        }`}>{m.canal === 'ambos' ? 'Ambos' : (m.canal ?? 'b2c').toUpperCase()}</span>
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-400">
                         <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{m.telefono}</span>
@@ -288,7 +288,7 @@ export default function MensajerosLive() {
 
                     {/* Selector canal */}
                     <select
-                      value={m.canal}
+                      value={m.canal ?? 'b2c'}
                       onClick={e => e.stopPropagation()}
                       onChange={e => cambiarCanal(m.id, e.target.value as CanalMensajero)}
                       className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-600 flex-shrink-0 focus:outline-none focus:ring-1 focus:ring-indigo-300"

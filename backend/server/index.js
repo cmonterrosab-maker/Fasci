@@ -7,7 +7,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { applySecurityMiddleware } = require('../middleware/security');
 const { manejarMensaje } = require('./bot');
-const { sendWhatsAppMessage } = require('../services/whatsapp-service');
+const { sendWhatsAppMessage, sendTypingIndicator } = require('../services/whatsapp-service');
 
 // ─── Servicios ────────────────────────────────────────────────────────────────
 
@@ -196,6 +196,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const respuesta = await manejarMensaje(telefono, mensaje, contexto);
 
     if (respuesta) {
+      await sendTypingIndicator(telefono, respuesta);
       await sendWhatsAppMessage(telefono, respuesta);
       console.log(`[Webhook] Respuesta enviada a ${telefono}`);
     }
@@ -1487,9 +1488,11 @@ app.get('/api/admin/ordenes-compra', async (req, res) => {
       .select(`
         id, numero_orden, status, subtotal, descuento, total,
         metodo_pago, canal, notas, comprobante_url, created_at, pagada_at, entregada_at,
+        llegada_destino_at, mensajero_id,
         compradora_nombre, compradora_telefono, compradora_nit,
         drogueria_compradora_id,
         droguerias!drogueria_compradora_id (nombre, ciudad),
+        mensajeros!mensajero_id (id, nombre, telefono),
         detalle_ordenes_compra (
           id, nombre_medicamento, presentacion, cantidad, precio_mayorista, subtotal
         )
